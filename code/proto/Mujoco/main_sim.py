@@ -16,12 +16,13 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 
-from control import compute_control
+from control import compute_control, read_robot_sensors
 from display import DisplayManager
 from sim_config import (
-    N, ROBOT_SPACING, SIMULATION_DURATION, PHYSICS_XML, ROBOT_CONFIGS,
-    VIEWER_ON, VIDEO_RENDERER_ON, SHOW_LIVE_POS_ON
+    N, ROBOT_SPACING, SIMULATION_DURATION, PHYSICS_XML,
+    VIEWER_ON, VIDEO_RENDERER_ON, SHOW_LIVE_POS_ON, ROBOT_CONTROL
 )
+from robot_config import ROBOT_CONFIGS
 from video_render import VideoRecorder
 
 # ---------------------------------------------------------------------------
@@ -38,11 +39,14 @@ print(f"Robots        : {N}  (spacing={ROBOT_SPACING} m)")
 print(f"Viewer        : {'ON' if VIEWER_ON else 'OFF (full speed)'}")
 print(f"Video render  : {'ON' if VIDEO_RENDERER_ON else 'OFF'}\n")
 
-for i, cfg in enumerate(ROBOT_CONFIGS[:N]):
-    print(f"  R{i}: freq={cfg['frequency']} Hz  "
-          f"amp={np.degrees(cfg['amplitude']):.0f}°  "
-          f"static={np.degrees(cfg['static'][0]):.0f}°")
-print()
+if ROBOT_CONTROL == "pre-configured":
+    for i, cfg in enumerate(ROBOT_CONFIGS[:N]):
+        print(f"  R{i}: freq={cfg['frequency']} Hz  "
+              f"amp={np.degrees(cfg['amplitude']):.0f}°  "
+              f"static={np.degrees(cfg['static'][0]):.0f}°")
+    print()
+else:
+    print("Externally controlled robot.")
 
 # ---------------------------------------------------------------------------
 # One independent physics state per robot
@@ -85,7 +89,8 @@ with viewer_context as viewer:
 
         # Step each robot independently
         for robot_index, state in enumerate(robot_states):
-            state.ctrl[:] = compute_control(robot_index, current_time, state.qpos)
+            sensors = read_robot_sensors(state)
+            state.ctrl[:] = compute_control(robot_index, current_time, sensors)
             mujoco.mj_step(physics_model, state)
 
         # Viewer update (skipped when OFF)
@@ -112,7 +117,7 @@ with viewer_context as viewer:
             filled    = int(BAR_WIDTH * (step + 1) / TOTAL_STEPS)
             bar       = "█" * filled + "░" * (BAR_WIDTH - filled)
             pct       = 100.0 * step / TOTAL_STEPS
-            print(f"\r  [{bar}] {pct:5.1f}%  t={current_time:.1f}/{SIMULATION_DURATION:.1f}s", end="", flush=True)
+            print(f"\r  [{bar}] {pct:5.1f}%  t_sim={current_time:.1f}/{SIMULATION_DURATION:.1f}s", end="", flush=True)
 
 
 if not SHOW_LIVE_POS_ON:

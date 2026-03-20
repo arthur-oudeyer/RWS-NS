@@ -34,8 +34,8 @@
     <texture type="skybox" builtin="gradient"
              rgb1="0.4 0.6 0.8" rgb2="0.05 0.05 0.1" width="512" height="512"/>
     <texture type="2d" name="floor_texture" builtin="checker"
-             rgb1="0.25 0.35 0.45" rgb2="0.15 0.2 0.3" width="300" height="300"/>
-    <material name="floor_material" texture="floor_texture" texrepeat="4 4"/>
+             rgb1="0.25 0.35 0.45" rgb2="0.15 0.2 0.3" width="1000" height="1000"/>
+    <material name="floor_material" texture="floor_texture" texrepeat="64 64"/>
   </asset>
 
   <!-- ================================================================ -->
@@ -44,7 +44,7 @@
   <worldbody>
 
     <light pos="0 0 3" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
-    <geom name="floor" type="plane" size="5 5 0.1" material="floor_material"/>
+    <geom name="floor" type="plane" size="100 100 0.1" material="floor_material"/>
 
     <!--
       TORSO — the central body of the robot.
@@ -150,6 +150,6 @@
     <position name="servo_leg1" joint="hip1" kp="12" ctrllimited="true" ctrlrange="-0.8 0.8"/>
     <position name="servo_leg2" joint="hip2" kp="12" ctrllimited="true" ctrlrange="-0.8 0.8"/>
     <position name="servo_leg3" joint="hip3" kp="12" ctrllimited="true" ctrlrange="-0.8 0.8"/>
-  </actuator>
+  </actuator>s
 
 </mujoco>
