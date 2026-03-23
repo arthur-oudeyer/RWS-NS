@@ -1,6 +1,6 @@
 import numpy as np
 import copy
-from sim_config import N
+from sim_config import N, ROBOT_CONTROL
 
 # ---------------------------------------------------------------------------
 # Robot physical description
@@ -58,8 +58,9 @@ ROBOT_CONFIGS = [
 ]
 
 # Pad list to length N by repeating the last entry
-if len(ROBOT_CONFIGS) < N:
-    print("Config ERROR : N > len(ROBOT_CONFIGS) !")
-while len(ROBOT_CONFIGS) < N:
-    ROBOT_CONFIGS.append(copy.deepcopy(ROBOT_CONFIGS[-1]))
+if ROBOT_CONTROL == "pre-configured":
+    if len(ROBOT_CONFIGS) < N :
+        print("Config ERROR : N > len(ROBOT_CONFIGS) !")
+    while len(ROBOT_CONFIGS) < N:
+        ROBOT_CONFIGS.append(copy.deepcopy(ROBOT_CONFIGS[-1]))
 

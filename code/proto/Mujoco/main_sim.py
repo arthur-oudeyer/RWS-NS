@@ -16,12 +16,14 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Brain'))
+from simple_brain import controllers as nn_controllers
+
 from control import compute_control, read_robot_sensors
+from data import DataManager
 from display import DisplayManager
-from sim_config import (
-    N, ROBOT_SPACING, SIMULATION_DURATION, PHYSICS_XML,
-    VIEWER_ON, VIDEO_RENDERER_ON, SHOW_LIVE_POS_ON, ROBOT_CONTROL
-)
+from sim_config import *
 from robot_config import ROBOT_CONFIGS
 from video_render import VideoRecorder
 
@@ -52,6 +54,7 @@ else:
 # One independent physics state per robot
 # ---------------------------------------------------------------------------
 robot_states = [mujoco.MjData(physics_model) for _ in range(N)]
+data_manager = DataManager(N, mode=DATA_MODE, controllers=nn_controllers, save_best=(SAVE_BEST, UNIQUE_SAVE_BEST))
 
 # ---------------------------------------------------------------------------
 # Optional: display and recorder (only created when their flag is ON)
@@ -64,7 +67,6 @@ recorder = VideoRecorder(n=N, physics_model=physics_model) if VIDEO_RENDERER_ON 
 # when VIEWER_ON is False, so the loop body stays identical in both cases.
 # ---------------------------------------------------------------------------
 TOTAL_STEPS = int(SIMULATION_DURATION / physics_model.opt.timestep)
-center_x    = (N - 1) * ROBOT_SPACING / 2
 
 viewer_context = (
     mujoco.viewer.launch_passive(display.model, display.state)
@@ -78,10 +80,12 @@ print("Simulation started... ")
 with viewer_context as viewer:
 
     if VIEWER_ON:
+        center_x = (display.cols - 1) * ROBOT_SPACING / 2
+        center_y = (display.rows - 1) * ROBOT_SPACING / 2
         viewer.cam.azimuth   = 20
         viewer.cam.elevation = -20
-        viewer.cam.distance  = N * ROBOT_SPACING * 1.4
-        viewer.cam.lookat[:] = [center_x, 0.0, 0.4]
+        viewer.cam.distance  = max(display.cols, display.rows) * ROBOT_SPACING * 1.8
+        viewer.cam.lookat[:] = [center_x, center_y, 0.4]
         print("Viewer open. Close the window to stop.\n")
 
     for step in range(TOTAL_STEPS):
@@ -90,6 +94,7 @@ with viewer_context as viewer:
         # Step each robot independently
         for robot_index, state in enumerate(robot_states):
             sensors = read_robot_sensors(state)
+            data_manager.record(current_time, robot_index, sensors)
             state.ctrl[:] = compute_control(robot_index, current_time, sensors)
             mujoco.mj_step(physics_model, state)
 
@@ -127,3 +132,4 @@ if VIDEO_RENDERER_ON:
     recorder.close()
 
 print(f"\nSimulation finished. (t= {time.time() - Time_start}s)")
+data_manager.print_summary()

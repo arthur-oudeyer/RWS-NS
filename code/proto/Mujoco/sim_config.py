@@ -11,7 +11,24 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 VIEWER_ON = True
 VIDEO_RENDERER_ON = False
+
+DATA_MODE = "Full" # StartStop / Full
+SAVE_BEST = True # Create a "last_best.pkl"
+UNIQUE_SAVE_BEST = False # Create a "best_392304702147.pkl"
+
 SHOW_LIVE_POS_ON = False
+
+# ---------------------------------------------------------------------------
+# Controller initialisation
+# ---------------------------------------------------------------------------
+# None                                    → all robots start with fresh random weights
+# "last_best"                             → load all from the latest best robots save
+# "last_sim"                              → load all from the previous simulation
+# {"source": "last_sim",                  → load only listed indices from source,
+#  "indices": [0, 4, 5, 6, 9]}              fresh random weights for the rest
+# {"source": "best_20250323_143012",      → same, from a specific named save
+#  "indices": "all"}
+CONTROLLER_INIT = "last_best"
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -23,10 +40,10 @@ RENDER_DIR  = ROOT_DIR / "render"
 # ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
-N                   = 10     # number of robots to simulate in parallel
-ROBOT_SPACING       = 0.7    # distance between robots in the viewer (metres)
+N                   = 1     # number of robots to simulate in parallel
+ROBOT_SPACING       = 1.    # distance between robots in the viewer (metres)
 SIMULATION_DURATION = 5.0    # seconds
-ROBOT_CONTROL = "pre-configured"    # pre-configured / external
+ROBOT_CONTROL = "external"    # pre-configured / external
 
 # ---------------------------------------------------------------------------
 # Video recording

@@ -16,9 +16,12 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 
-from sim_config import ROBOT_CONTROL
+from sim_config import ROBOT_CONTROL, N, CONTROLLER_INIT
 from robot_config import N_HIP
 
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Brain'))
+from controller import getController
 
 # ---------------------------------------------------------------------------
 # RobotSensorData — structured view of MjData for one robot.
@@ -53,6 +56,15 @@ class RobotSensorData:
             f"  ({fmt_vec(hip_deg)} °)\n"
             f"  hip_velocities: {fmt_vec(self.hip_velocities)} rad/s"
         )
+
+    def getTorsoData(self):
+        return np.array((*self.torso_pos, *self.torso_orientation, *self.torso_velocity))
+
+    def getHipsData(self):
+        return np.array((*self.hip_angles, *self.hip_velocities))
+
+    def getData(self):
+        return np.array((*self.getTorsoData(), *self.getHipsData()))
 
 def read_robot_sensors(state: mujoco.MjData) -> RobotSensorData:
     """
@@ -108,7 +120,7 @@ def compute_control(robot_index: int, current_time: float, sensors: RobotSensorD
         raise Exception("Error : ROBOT_CONTROL not recognized.")
 
     if target_angles.size != N_HIP:
-        raise Exception(f"Error : ROBOT_CONTROL did not gave the right number of angle targets. ({target_angles.size} != {N_HIP} needed)")
+        raise Exception(f"Error : Controller did not gave the right number of angle targets. ({target_angles.size} != {N_HIP} needed)")
 
     return target_angles
 
@@ -124,4 +136,6 @@ def pre_configured_control(robot_index: int, current_time: float) -> np.ndarray:
 def default_external_control(robot_index: int, current_time: float, n_hip: int, sensors: RobotSensorData) -> np.ndarray:
     return np.array([0.] * N_HIP)
 
-external_control = default_external_control
+external_control = getController(N, CONTROLLER_INIT)
+if external_control is None:
+    external_control = default_external_control

@@ -19,6 +19,7 @@ Usage
 """
 
 import copy
+import math
 import xml.etree.ElementTree as ET
 from typing import List
 
@@ -28,14 +29,23 @@ import numpy as np
 from sim_config import PHYSICS_XML, ROBOT_SPACING
 
 
+def _grid_dims(n: int) -> tuple[int, int]:
+    """Return (cols, rows) for the tightest square grid fitting n robots."""
+    cols = math.ceil(math.sqrt(n))
+    rows = math.ceil(n / cols)
+    return cols, rows
+
+
 def _build_display_xml(n: int, spacing: float) -> str:
     """
     Parses the physics XML and returns an MJCF string containing N robots
-    placed at x = 0, spacing, 2*spacing, ...
+    arranged in a square grid (cols × rows).
 
     All named elements are prefixed with r{i}_ to avoid conflicts.
     No <actuator> block — the display model is never stepped.
     """
+    cols, _ = _grid_dims(n)
+
     tree   = ET.parse(PHYSICS_XML)
     source = tree.getroot()
 
@@ -49,7 +59,6 @@ def _build_display_xml(n: int, spacing: float) -> str:
     src_worldbody  = source.find("worldbody")
     disp_worldbody = ET.SubElement(display, "worldbody")
 
-    # Copy floor, lights (everything that is not a <body>)
     for child in src_worldbody:
         if child.tag != "body":
             disp_worldbody.append(copy.deepcopy(child))
@@ -63,7 +72,9 @@ def _build_display_xml(n: int, spacing: float) -> str:
             if "name" in elem.attrib:
                 elem.attrib["name"] = f"r{i}_{elem.attrib['name']}"
 
-        robot_copy.attrib["pos"] = f"{i * spacing} 0 0.5"
+        col = i % cols
+        row = i // cols
+        robot_copy.attrib["pos"] = f"{col * spacing} {row * spacing} 0.5"
         disp_worldbody.append(robot_copy)
 
     return ET.tostring(display, encoding="unicode")
@@ -85,6 +96,7 @@ class DisplayManager:
         self.nq_per_robot = physics_model.nq   # qpos size for one robot
         self.robot_states = robot_states
         self.spacing      = ROBOT_SPACING
+        self.cols, self.rows = _grid_dims(n)
 
         xml          = _build_display_xml(n, ROBOT_SPACING)
         self.model   = mujoco.MjModel.from_xml_string(xml)
@@ -102,6 +114,7 @@ class DisplayManager:
         for i, state in enumerate(self.robot_states):
             start = i * self.nq_per_robot
             self.state.qpos[start : start + self.nq_per_robot] = state.qpos
-            self.state.qpos[start] += i * self.spacing   # X offset for display
+            self.state.qpos[start]     += (i % self.cols) * self.spacing   # X offset
+            self.state.qpos[start + 1] += (i // self.cols) * self.spacing  # Y offset
 
         mujoco.mj_forward(self.model, self.state)

@@ -147,9 +147,9 @@
   <!-- (prevents overshoot that would slam the leg into joint limits)   -->
   <!-- ================================================================ -->
   <actuator>
-    <position name="servo_leg1" joint="hip1" kp="12" ctrllimited="true" ctrlrange="-0.8 0.8"/>
-    <position name="servo_leg2" joint="hip2" kp="12" ctrllimited="true" ctrlrange="-0.8 0.8"/>
-    <position name="servo_leg3" joint="hip3" kp="12" ctrllimited="true" ctrlrange="-0.8 0.8"/>
-  </actuator>s
+    <position name="servo_leg1" joint="hip1" kp="25" ctrllimited="true" ctrlrange="-1.5 0.8"/>
+    <position name="servo_leg2" joint="hip2" kp="25" ctrllimited="true" ctrlrange="-1.5 0.8"/>
+    <position name="servo_leg3" joint="hip3" kp="25" ctrllimited="true" ctrlrange="-1.5 0.8"/>
+  </actuator>
 
 </mujoco>
