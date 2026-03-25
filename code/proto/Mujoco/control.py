@@ -16,12 +16,12 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 
-from sim_config import ROBOT_CONTROL, N, CONTROLLER_INIT
-from robot_config import N_HIP
+from sim_config import ROBOT_CONTROL, N, CONTROLLER_INIT, MORPHOLOGIES
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Brain'))
 from controller import getController
+from morphology import resolve_morphologies
 
 # ---------------------------------------------------------------------------
 # RobotSensorData — structured view of MjData for one robot.
@@ -66,23 +66,23 @@ class RobotSensorData:
     def getData(self):
         return np.array((*self.getTorsoData(), *self.getHipsData()))
 
-def read_robot_sensors(state: mujoco.MjData) -> RobotSensorData:
+def read_robot_sensors(state: mujoco.MjData, n_joints: int) -> RobotSensorData:
     """
     Extract useful values from a raw MjData object and return them
     as a named RobotSensorData, ready to pass into compute_control().
 
-    Indices are derived from N_HIP (set in robot_config.py) so nothing
-    is hardcoded here — change N_HIP and this function adapts automatically.
+    Indices are derived from n_joints so nothing is hardcoded here —
+    change the morphology and this function adapts automatically.
 
     qpos layout:
-        [0 : 3]              freejoint position  (x, y, z)
-        [3 : 7]              freejoint quaternion (w, x, y, z)
-        [7 : 7 + N_HIP]      hip joint angles
+        [0 : 3]                freejoint position  (x, y, z)
+        [3 : 7]                freejoint quaternion (w, x, y, z)
+        [7 : 7 + n_joints]     hip joint angles
 
     qvel layout:
-        [0 : 3]              linear velocity  (vx, vy, vz)
-        [3 : 6]              angular velocity (wx, wy, wz)
-        [6 : 6 + N_HIP]      hip joint velocities
+        [0 : 3]                linear velocity  (vx, vy, vz)
+        [3 : 6]                angular velocity (wx, wy, wz)
+        [6 : 6 + n_joints]     hip joint velocities
     """
     _HIP_QPOS = 7           # freejoint always occupies qpos[0:7]
     _HIP_QVEL = 6           # freejoint always occupies qvel[0:6]
@@ -92,8 +92,8 @@ def read_robot_sensors(state: mujoco.MjData) -> RobotSensorData:
         torso_height      = float(state.qpos[2]),
         torso_orientation = state.qpos[3:7].copy(),
         torso_velocity    = state.qvel[0:3].copy(),
-        hip_angles        = state.qpos[_HIP_QPOS : _HIP_QPOS + N_HIP].copy(),
-        hip_velocities    = state.qvel[_HIP_QVEL : _HIP_QVEL + N_HIP].copy(),
+        hip_angles        = state.qpos[_HIP_QPOS : _HIP_QPOS + n_joints].copy(),
+        hip_velocities    = state.qvel[_HIP_QVEL : _HIP_QVEL + n_joints].copy(),
     )
 
 if ROBOT_CONTROL == "pre-configured":
@@ -101,7 +101,7 @@ if ROBOT_CONTROL == "pre-configured":
 else:
     ROBOT_CONFIGS = None
 
-def compute_control(robot_index: int, current_time: float, sensors: RobotSensorData) -> np.ndarray:
+def compute_control(robot_index: int, current_time: float, sensors: RobotSensorData, n_joints: int) -> np.ndarray:
     """
     Returns the target joint angle (radians) for each servo.
 
@@ -111,16 +111,17 @@ def compute_control(robot_index: int, current_time: float, sensors: RobotSensorD
     current_time : simulation time in seconds
     sensors      : structured sensor readings from read_robot_sensors()
                    (use sensors.hip_angles, sensors.torso_pos, etc.)
+    n_joints     : number of joints for this robot's morphology
     """
     if ROBOT_CONTROL == "pre-configured":
         target_angles = pre_configured_control(robot_index, current_time)
     elif ROBOT_CONTROL == "external":
-        target_angles = external_control(robot_index, current_time, N_HIP, sensors)
+        target_angles = external_control(robot_index, current_time, n_joints, sensors)
     else:
         raise Exception("Error : ROBOT_CONTROL not recognized.")
 
-    if target_angles.size != N_HIP:
-        raise Exception(f"Error : Controller did not gave the right number of angle targets. ({target_angles.size} != {N_HIP} needed)")
+    if target_angles.size != n_joints:
+        raise Exception(f"Error : Controller did not gave the right number of angle targets. ({target_angles.size} != {n_joints} needed)")
 
     return target_angles
 
@@ -133,9 +134,13 @@ def pre_configured_control(robot_index: int, current_time: float) -> np.ndarray:
     )
     return target_angles
 
-def default_external_control(robot_index: int, current_time: float, n_hip: int, sensors: RobotSensorData) -> np.ndarray:
-    return np.array([0.] * N_HIP)
+def default_external_control(robot_index: int, current_time: float, n_joints: int, sensors: RobotSensorData) -> np.ndarray:
+    return np.zeros(n_joints)
 
-external_control = getController(N, CONTROLLER_INIT)
-if external_control is None:
-    external_control = default_external_control
+external_control = default_external_control
+
+def init_robots_controllers(robot_morphologies):
+    global external_control
+    external_control = getController(N, CONTROLLER_INIT, robot_morphologies)
+    if external_control is None:
+        external_control = default_external_control

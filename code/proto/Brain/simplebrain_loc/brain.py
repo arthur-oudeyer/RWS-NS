@@ -19,6 +19,10 @@ class NeuralNetwork:
             self.nb_outputs = copy_from.nb_outputs
             self.nb_neurons_by_layer = list(copy_from.nb_neurons_by_layer)
             self.layers = [layer.getCopy() for layer in copy_from.layers]
+            for layer in self.layers:
+                layer.network = self
+                for neuron in layer.neurons:
+                    neuron.network = self
 
     def predict(self, inputs):
         if len(inputs) != self.nb_inputs:
@@ -38,6 +42,20 @@ class NeuralNetwork:
         for _ in range(amount):
             self.nb_inputs += 1
             self.layers[0].NewInput()
+    def RemoveInput(self, amount=1):
+        for _ in range(amount):
+            self.nb_inputs += -1
+            self.layers[0].RemoveInput()
+
+    def NewOutput(self, amount=1):
+        for _ in range(amount):
+            self.nb_outputs += 1
+            self.layers[-1].NewNeuron()
+    def RemoveOutput(self, amount=1, rnd=False):
+        for _ in range(amount):
+            self.nb_outputs += -1
+            self.layers[-1].RemoveNeuron(rnd=rnd)
+
     def NewNeuron(self, at_layer=0, amount=1):
         if at_layer == -1:
             at_layer = len(self.layers) - 1
@@ -87,9 +105,18 @@ class Layer:
         self.nb_inputs += 1
         for neuron in self.neurons:
             neuron.AddInput()
+    def RemoveInput(self):
+        self.nb_inputs += -1
+        for neuron in self.neurons:
+            neuron.RemoveInput()
+
     def NewNeuron(self):
         self.neurons.append(Neuron(self.size_in(), network=self.network))
         self.nb_neurons = len(self.neurons)
+    def RemoveNeuron(self, rnd=False):
+        self.neurons.pop(-1 if not rnd else bm.rndInt(0, len(self.neurons) - 1))
+        self.nb_neurons = len(self.neurons)
+
     def getCopy(self):
         return Layer(self.nb_neurons, len(self.neurons), neurons_parameters=[{'weights': neuron.weights[:], 'bias': neuron.bias} for neuron in self.neurons])
     def controlInputs(self, nb_input):
@@ -119,6 +146,8 @@ class Neuron:
 
     def AddInput(self):
         self.weights = np.array(list(self.weights) + [(2 * bm.random() - 1.)/(len(self.weights)**0.5)])
+    def RemoveInput(self):
+        self.weights = self.weights[:-1]
 
 def PrintNeuralNetwork(network: NeuralNetwork):
     print(f"Network Print : ({network.getSize()} conexions, {len(network.layers)} layers, {network.nb_inputs} inputs, {network.nb_outputs} outputs)")

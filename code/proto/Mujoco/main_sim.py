@@ -15,31 +15,43 @@ import contextlib
 import mujoco
 import mujoco.viewer
 import numpy as np
+from colorama import Fore, Back, Style
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Brain'))
 from simple_brain import controllers as nn_controllers
+from morphology import MorphologyManager, resolve_morphologies
 
-from control import compute_control, read_robot_sensors
+from control import compute_control, read_robot_sensors, init_robots_controllers
 from data import DataManager
 from display import DisplayManager
 from sim_config import *
 from robot_config import ROBOT_CONFIGS
 from video_render import VideoRecorder
 
+print(Fore.LIGHTBLUE_EX + "\nMujoco Simulation Started\n" + Style.RESET_ALL)
+
+print(Fore.LIGHTGREEN_EX + f"Robots        : {N}  (spacing={ROBOT_SPACING} m)")
+print(f"Viewer        : {'ON' if VIEWER_ON else 'OFF (full speed)'}")
+print(f"Video render  : {'ON' if VIDEO_RENDERER_ON else 'OFF'}\n" + Style.RESET_ALL)
+
 # ---------------------------------------------------------------------------
 # Load the physics model (one robot, shared across all simulations)
 # ---------------------------------------------------------------------------
-physics_model = mujoco.MjModel.from_xml_path(str(PHYSICS_XML))
-physics_model.opt.iterations = 100  # default=100 — solver iterations (accuracy vs speed)
-physics_model.opt.ls_iterations = 50  # default=50  — line-search iterations
-physics_model.opt.timestep = 0.005  # default=0.005 —
+print(Fore.YELLOW + f"Building robots models ({N}, {CONTROLLER_INIT})...")
+morph_manager      = MorphologyManager(env_xml_path=str(PHYSICS_XML))
+robot_morphologies = resolve_morphologies(N, CONTROLLER_INIT, MORPHOLOGIES)
+robot_models       = [morph_manager.get_model(m) for m in robot_morphologies]
+for model in robot_models:
+    model.opt.iterations = 100
+    model.opt.ls_iterations = 50
+    model.opt.timestep = 0.005
 
-print(f"Physics model : nq={physics_model.nq}, nu={physics_model.nu}, "
-      f"timestep={physics_model.opt.timestep} s")
-print(f"Robots        : {N}  (spacing={ROBOT_SPACING} m)")
-print(f"Viewer        : {'ON' if VIEWER_ON else 'OFF (full speed)'}")
-print(f"Video render  : {'ON' if VIDEO_RENDERER_ON else 'OFF'}\n")
+print(f"\nSetup Controllers ({N}, {CONTROLLER_INIT})..")
+init_robots_controllers(robot_morphologies)
+
+print(f"\nPhysics model (first) : nq={robot_models[0].nq}, nu={robot_models[0].nu}, "
+      f"timestep={robot_models[0].opt.timestep} s\n")
 
 if ROBOT_CONTROL == "pre-configured":
     for i, cfg in enumerate(ROBOT_CONFIGS[:N]):
@@ -53,20 +65,25 @@ else:
 # ---------------------------------------------------------------------------
 # One independent physics state per robot
 # ---------------------------------------------------------------------------
-robot_states = [mujoco.MjData(physics_model) for _ in range(N)]
-data_manager = DataManager(N, mode=DATA_MODE, controllers=nn_controllers, save_best=(SAVE_BEST, UNIQUE_SAVE_BEST))
+robot_states = [mujoco.MjData(robot_models[i]) for i in range(N)]
+data_manager = DataManager(N, mode=DATA_MODE, controllers=nn_controllers, save_best=(SAVE_BEST, UNIQUE_SAVE_BEST), morphologies=robot_morphologies)
 
 # ---------------------------------------------------------------------------
 # Optional: display and recorder (only created when their flag is ON)
 # ---------------------------------------------------------------------------
-display  = DisplayManager(n=N, physics_model=physics_model, robot_states=robot_states) if VIEWER_ON else None
-recorder = VideoRecorder(n=N, physics_model=physics_model) if VIDEO_RENDERER_ON else None
+display = DisplayManager(
+    n                 = N,
+    robot_morphologies= robot_morphologies,
+    robot_states      = robot_states,
+    morph_manager     = morph_manager,
+) if VIEWER_ON else None
+recorder = VideoRecorder(n=N, physics_model=robot_models[0]) if VIDEO_RENDERER_ON else None
 
 # ---------------------------------------------------------------------------
 # Simulation loop — runs with or without viewer using a null context manager
 # when VIEWER_ON is False, so the loop body stays identical in both cases.
 # ---------------------------------------------------------------------------
-TOTAL_STEPS = int(SIMULATION_DURATION / physics_model.opt.timestep)
+TOTAL_STEPS = int(SIMULATION_DURATION / robot_models[0].opt.timestep)
 
 viewer_context = (
     mujoco.viewer.launch_passive(display.model, display.state)
@@ -75,7 +92,7 @@ viewer_context = (
 )
 
 Time_start = time.time()
-print("Simulation started... ")
+print(Fore.LIGHTRED_EX + "\nSimulation started... " + Style.RESET_ALL)
 
 with viewer_context as viewer:
 
@@ -89,14 +106,15 @@ with viewer_context as viewer:
         print("Viewer open. Close the window to stop.\n")
 
     for step in range(TOTAL_STEPS):
-        current_time = step * physics_model.opt.timestep
+        current_time = step * robot_models[0].opt.timestep
 
         # Step each robot independently
         for robot_index, state in enumerate(robot_states):
-            sensors = read_robot_sensors(state)
+            n_joints = robot_morphologies[robot_index].n_joints
+            sensors  = read_robot_sensors(state, n_joints)
             data_manager.record(current_time, robot_index, sensors)
-            state.ctrl[:] = compute_control(robot_index, current_time, sensors)
-            mujoco.mj_step(physics_model, state)
+            state.ctrl[:] = compute_control(robot_index, current_time, sensors, n_joints)
+            mujoco.mj_step(robot_models[robot_index], state)
 
         # Viewer update (skipped when OFF)
         if VIEWER_ON:
@@ -104,14 +122,14 @@ with viewer_context as viewer:
             viewer.sync()
             if not viewer.is_running():
                 break
-            time.sleep(physics_model.opt.timestep)   # real-time pacing
+            time.sleep(robot_models[0].opt.timestep)   # real-time pacing
 
         # Video capture (skipped when OFF)
         if VIDEO_RENDERER_ON:
             recorder.capture(step, robot_states)
 
         if SHOW_LIVE_POS_ON:
-            if step % int(1.0 / physics_model.opt.timestep) == 0:
+            if step % int(1.0 / robot_models[0].opt.timestep) == 0:
                 print(f"  t={current_time:.1f}s", end="")
                 for i, state in enumerate(robot_states):
                     c = state.ctrl
@@ -131,5 +149,7 @@ if not SHOW_LIVE_POS_ON:
 if VIDEO_RENDERER_ON:
     recorder.close()
 
-print(f"\nSimulation finished. (t= {time.time() - Time_start}s)")
+print(Fore.LIGHTRED_EX + f"\nSimulation finished. (t= {time.time() - Time_start}s)" + Style.RESET_ALL)
+print(Fore.LIGHTWHITE_EX, end="")
 data_manager.print_summary()
+print(Style.RESET_ALL, end="")

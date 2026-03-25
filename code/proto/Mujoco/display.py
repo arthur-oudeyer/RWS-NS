@@ -20,11 +20,16 @@ Usage
 
 import copy
 import math
+import os
+import sys
 import xml.etree.ElementTree as ET
 from typing import List
 
 import mujoco
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Brain'))
+from morphology import MorphologyManager, RobotMorphology
 
 from sim_config import PHYSICS_XML, ROBOT_SPACING
 
@@ -36,46 +41,42 @@ def _grid_dims(n: int) -> tuple[int, int]:
     return cols, rows
 
 
-def _build_display_xml(n: int, spacing: float) -> str:
-    """
-    Parses the physics XML and returns an MJCF string containing N robots
-    arranged in a square grid (cols × rows).
-
-    All named elements are prefixed with r{i}_ to avoid conflicts.
-    No <actuator> block — the display model is never stepped.
-    """
+def _build_display_xml(
+    morphologies: list[RobotMorphology],
+    spacing:      float,
+    morph_manager: MorphologyManager,
+    env_xml_path: str,
+) -> str:
+    n    = len(morphologies)
     cols, _ = _grid_dims(n)
 
-    tree   = ET.parse(PHYSICS_XML)
-    source = tree.getroot()
+    # Environment (floor, lights, visual, asset) from base XML
+    env_tree = ET.parse(env_xml_path)
+    env_root = env_tree.getroot()
 
-    display = ET.Element("mujoco", model="tripod_display")
-
+    display = ET.Element("mujoco", model="display")
     for tag in ("option", "visual", "asset"):
-        elem = source.find(tag)
+        elem = env_root.find(tag)
         if elem is not None:
             display.append(copy.deepcopy(elem))
 
-    src_worldbody  = source.find("worldbody")
-    disp_worldbody = ET.SubElement(display, "worldbody")
-
+    worldbody = ET.SubElement(display, "worldbody")
+    src_worldbody = env_root.find("worldbody")
     for child in src_worldbody:
         if child.tag != "body":
-            disp_worldbody.append(copy.deepcopy(child))
+            worldbody.append(copy.deepcopy(child))
 
-    robot_body = src_worldbody.find("body")
-
-    for i in range(n):
-        robot_copy = copy.deepcopy(robot_body)
-
-        for elem in robot_copy.iter():
-            if "name" in elem.attrib:
-                elem.attrib["name"] = f"r{i}_{elem.attrib['name']}"
-
+    for i, morph in enumerate(morphologies):
         col = i % cols
         row = i // cols
-        robot_copy.attrib["pos"] = f"{col * spacing} {row * spacing} 0.5"
-        disp_worldbody.append(robot_copy)
+        body_elem = morph_manager.generate_body_element(
+            morph   = morph,
+            prefix  = f"r{i}_",
+            col     = col,
+            row     = row,
+            spacing = spacing,
+        )
+        worldbody.append(body_elem)
 
     return ET.tostring(display, encoding="unicode")
 
@@ -86,35 +87,38 @@ class DisplayManager:
 
     Parameters
     ----------
-    n            : number of robots
-    physics_model: the single-robot MjModel used for physics
-    robot_states : list of MjData, one per robot
+    n                  : number of robots
+    robot_morphologies : list of RobotMorphology, one per robot
+    robot_states       : list of MjData, one per robot
+    morph_manager      : MorphologyManager used to build the display XML
     """
 
-    def __init__(self, n: int, physics_model: mujoco.MjModel, robot_states: List[mujoco.MjData]):
-        self.n            = n
-        self.nq_per_robot = physics_model.nq   # qpos size for one robot
-        self.robot_states = robot_states
-        self.spacing      = ROBOT_SPACING
-        self.cols, self.rows = _grid_dims(n)
+    def __init__(
+        self,
+        n:                  int,
+        robot_morphologies: list[RobotMorphology],
+        robot_states:       List[mujoco.MjData],
+        morph_manager:      MorphologyManager,
+    ):
+        self.n                  = n
+        self.robot_morphologies = robot_morphologies
+        self.robot_states       = robot_states
+        self.spacing            = ROBOT_SPACING
+        self.cols, self.rows    = _grid_dims(n)
+        self.nq_per_robot       = [m.n_qpos for m in robot_morphologies]
 
-        xml          = _build_display_xml(n, ROBOT_SPACING)
-        self.model   = mujoco.MjModel.from_xml_string(xml)
-        self.state   = mujoco.MjData(self.model)
+        xml        = _build_display_xml(robot_morphologies, ROBOT_SPACING, morph_manager, str(PHYSICS_XML))
+        self.model = mujoco.MjModel.from_xml_string(xml)
+        self.state = mujoco.MjData(self.model)
+
+        print(f"Display Manager initialized (spacing={self.spacing})")
 
     def sync_from_physics(self):
-        """
-        Copy each robot's qpos into the display model, then call mj_forward
-        so the viewer reflects the current physics state.
-
-        The freejoint x-position (qpos[0] per robot) is shifted by
-        i * spacing so robots appear side-by-side in the viewer.
-        Each robot's own physics world is always centred at the origin.
-        """
-        for i, state in enumerate(self.robot_states):
-            start = i * self.nq_per_robot
-            self.state.qpos[start : start + self.nq_per_robot] = state.qpos
-            self.state.qpos[start]     += (i % self.cols) * self.spacing   # X offset
-            self.state.qpos[start + 1] += (i // self.cols) * self.spacing  # Y offset
+        offset = 0
+        for i, (state, nq) in enumerate(zip(self.robot_states, self.nq_per_robot)):
+            self.state.qpos[offset : offset + nq] = state.qpos
+            self.state.qpos[offset]     += (i % self.cols) * self.spacing   # X grid offset
+            self.state.qpos[offset + 1] += (i // self.cols) * self.spacing  # Y grid offset
+            offset += nq
 
         mujoco.mj_forward(self.model, self.state)

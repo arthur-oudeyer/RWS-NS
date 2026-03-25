@@ -74,12 +74,34 @@ def _dict_to_network(d: dict) -> NeuralNetwork:
 
 
 # ---------------------------------------------------------------------------
+# Morphology serialisation helpers
+# ---------------------------------------------------------------------------
+def _save_morphologies(morphologies, n_networks: int) -> list:
+    """Convert morphologies to plain dicts for storage. Returns [] if None."""
+    if not morphologies:
+        return []
+    from morphology import morphology_to_dict
+    if not isinstance(morphologies, list):
+        morphologies = [morphologies] * n_networks
+    return [morphology_to_dict(m) for m in morphologies]
+
+
+def _load_morphologies(raw: list) -> list:
+    """Reconstruct RobotMorphology objects from stored dicts."""
+    if not raw:
+        return []
+    from morphology import dict_to_morphology
+    return [dict_to_morphology(d) for d in raw]
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 def save_controller(
-    networks:  list[NeuralNetwork] | NeuralNetwork,
-    name:      str,
-    context:   dict = None,
+    networks:     list[NeuralNetwork] | NeuralNetwork,
+    name:         str,
+    context:      dict = None,
+    morphologies: list = None,   # list[RobotMorphology] — saved alongside networks
 ) -> str:
     """
     Serialise one or several NeuralNetworks to  saves/<name>.pkl
@@ -109,7 +131,8 @@ def save_controller(
             "nb_neurons_by_layer": list(first.nb_neurons_by_layer),
             "n_networks":          len(networks),
         },
-        "networks": [_network_to_dict(n) for n in networks],
+        "networks":     [_network_to_dict(n) for n in networks],
+        "morphologies": _save_morphologies(morphologies, len(networks)),
     }
 
     os.makedirs(SAVES_DIR, exist_ok=True)
@@ -117,7 +140,7 @@ def save_controller(
     with open(path, "wb") as f:
         pickle.dump(payload, f)
 
-    print(f"[saver] Saved {len(networks)} network(s) → {path}")
+    print(f"[saver] Saved {len(networks)} network(s) → {name}.pkl")
     return path
 
 
@@ -143,14 +166,16 @@ def load_controller(name: str) -> dict:
         payload = pickle.load(f)
 
     networks = [_dict_to_network(d) for d in payload["networks"]]
+    morphologies = _load_morphologies(payload.get("morphologies", []))
 
-    print(f"[saver] Loaded {len(networks)} network(s) from {path}  (saved {payload['saved_at']})")
+    print(f"[saver] Loaded {len(networks)} network(s) and {len(morphologies)} morphologies(s) from {name}.pkl  (saved {payload['saved_at']})")
 
     return {
         "architecture": payload["architecture"],
         "context":      payload["context"],
         "saved_at":     payload["saved_at"],
         "networks":     networks,
+        "morphologies": morphologies,
     }
 
 

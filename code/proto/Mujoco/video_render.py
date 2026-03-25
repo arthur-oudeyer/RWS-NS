@@ -70,8 +70,7 @@ class VideoRecorder:
         self._thread = threading.Thread(target=self._encoder_worker, daemon=True)
         self._thread.start()
 
-        print(f"VideoRecorder : {n} files → {RENDER_DIR}/")
-        print(f"  {self.actual_fps:.0f} fps | {RENDER_WIDTH}×{RENDER_HEIGHT} | ultrafast | async encoding")
+        print(f"VideoRecorder initialized : {n} files → {RENDER_DIR} | {self.actual_fps:.0f} fps | {RENDER_WIDTH}×{RENDER_HEIGHT} | ultrafast | async encoding")
 
     def _encoder_worker(self):
         """Runs in background — encodes frames without blocking the sim loop."""

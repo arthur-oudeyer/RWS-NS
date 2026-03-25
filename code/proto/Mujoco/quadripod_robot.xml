@@ -1,0 +1,172 @@
+<!--
+  quadripod_robot.xml
+  ===================
+  A quadripod robot: a free torso with 4 straight legs.
+  Each leg has one hip joint (hinge) that swings the leg forward/backward.
+
+  Structure:
+    world
+     └── torso (free joint)
+          ├── leg1  (hip joint 1 → controlled by servo_leg1)
+          ├── leg2  (hip joint 2 → controlled by servo_leg2)
+          ├── leg3  (hip joint 3 → controlled by servo_leg3)
+          └── leg4  (hip joint 4 → controlled by servo_leg4)
+
+  Leg layout (top view):
+            leg1 (0°, front)
+             |
+  leg4 -[torso]- leg2
+  (270°)    |    (90°)
+           leg3 (180°, back)
+-->
+
+<mujoco model="quadripod_robot">
+
+  <!-- Physics settings -->
+  <option timestep="0.005" gravity="0 0 -9.81"/>
+
+  <!-- Visual settings (cosmetic only) -->
+  <visual>
+    <headlight diffuse="0.7 0.7 0.7" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.1 0.2 0.3 1"/>
+  </visual>
+
+  <!-- Textures and materials -->
+  <asset>
+    <texture type="skybox" builtin="gradient"
+             rgb1="0.4 0.6 0.8" rgb2="0.05 0.05 0.1" width="512" height="512"/>
+    <texture type="2d" name="floor_texture" builtin="checker"
+             rgb1="0.25 0.35 0.45" rgb2="0.15 0.2 0.3" width="1000" height="1000"/>
+    <material name="floor_material" texture="floor_texture" texrepeat="64 64"/>
+  </asset>
+
+  <!-- ================================================================ -->
+  <!-- BODIES AND GEOMETRY                                              -->
+  <!-- ================================================================ -->
+  <worldbody>
+
+    <light pos="0 0 3" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
+    <geom name="floor" type="plane" size="100 100 0.1" material="floor_material"/>
+
+    <!--
+      TORSO — the central body of the robot.
+      Free joint allows it to move and rotate in 3D.
+      Positioned 0.5m above the floor.
+    -->
+    <body name="torso" pos="0 0 0.5">
+      <freejoint name="root"/>
+      <geom name="torso_geom"
+            type="cylinder" size="0.12 0.04"
+            rgba="0.4 0.4 0.5 1"/>
+
+      <!-- ==================================================
+           LEG 1  —  pointing front (+X direction, 0°)
+           Attachment point on torso edge: (0.12, 0, 0)
+           Hip joint axis: Y  →  leg swings in the XZ plane
+           ================================================== -->
+      <body name="leg1" pos="0.12 0 0">
+        <joint name="hip1"
+               type="hinge"
+               axis="0 1 0"
+               damping="4.0"/>
+        <geom name="leg1_geom"
+              type="capsule"
+              fromto="0 0 0   0 0 -0.25"
+              size="0.025"
+              rgba="0.3 0.6 0.9 1"/>
+        <body name="foot1" pos="0 0 -0.25">
+          <geom name="foot1_geom"
+                type="sphere" size="0.038"
+                rgba="0.9 0.7 0.2 1"
+                condim="3" friction="0.7 0.005 0.0001"/>
+        </body>
+      </body>
+
+      <!-- ==================================================
+           LEG 2  —  pointing right (+Y direction, 90°)
+           Attachment point on torso edge: (0, 0.12, 0)
+           Hip joint axis: -X  →  leg swings in the YZ plane
+           ================================================== -->
+      <body name="leg2" pos="0 0.12 0">
+        <joint name="hip2"
+               type="hinge"
+               axis="-1 0 0"
+               damping="4.0"/>
+        <geom name="leg2_geom"
+              type="capsule"
+              fromto="0 0 0   0 0 -0.25"
+              size="0.025"
+              rgba="0.3 0.7 0.4 1"/>
+        <body name="foot2" pos="0 0 -0.25">
+          <geom name="foot2_geom"
+                type="sphere" size="0.038"
+                rgba="0.9 0.7 0.2 1"
+                condim="3" friction="0.7 0.005 0.0001"/>
+        </body>
+      </body>
+
+      <!-- ==================================================
+           LEG 3  —  pointing back (-X direction, 180°)
+           Attachment point on torso edge: (-0.12, 0, 0)
+           Hip joint axis: -Y  →  leg swings in the XZ plane
+           ================================================== -->
+      <body name="leg3" pos="-0.12 0 0">
+        <joint name="hip3"
+               type="hinge"
+               axis="0 -1 0"
+               damping="4.0"/>
+        <geom name="leg3_geom"
+              type="capsule"
+              fromto="0 0 0   0 0 -0.25"
+              size="0.025"
+              rgba="0.8 0.3 0.3 1"/>
+        <body name="foot3" pos="0 0 -0.25">
+          <geom name="foot3_geom"
+                type="sphere" size="0.038"
+                rgba="0.9 0.7 0.2 1"
+                condim="3" friction="0.7 0.005 0.0001"/>
+        </body>
+      </body>
+
+      <!-- ==================================================
+           LEG 4  —  pointing left (-Y direction, 270°)
+           Attachment point on torso edge: (0, -0.12, 0)
+           Hip joint axis: X  →  leg swings in the YZ plane
+           ================================================== -->
+      <body name="leg4" pos="0 -0.12 0">
+        <joint name="hip4"
+               type="hinge"
+               axis="1 0 0"
+               damping="4.0"/>
+        <geom name="leg4_geom"
+              type="capsule"
+              fromto="0 0 0   0 0 -0.25"
+              size="0.025"
+              rgba="0.8 0.6 0.3 1"/>
+        <body name="foot4" pos="0 0 -0.25">
+          <geom name="foot4_geom"
+                type="sphere" size="0.038"
+                rgba="0.9 0.7 0.2 1"
+                condim="3" friction="0.7 0.005 0.0001"/>
+        </body>
+      </body>
+
+    </body>
+  </worldbody>
+
+  <!-- ================================================================ -->
+  <!-- ACTUATORS                                                        -->
+  <!--                                                                  -->
+  <!-- Type: "position" servo — ctrl = DESIRED ANGLE (in radians).     -->
+  <!-- kp        = stiffness (N·m per radian of error).                -->
+  <!-- ctrlrange = min/max allowed target angle in radians.             -->
+  <!-- Velocity damping is handled by joint "damping" above, NOT here. -->
+  <!-- ================================================================ -->
+  <actuator>
+    <position name="servo_leg1" joint="hip1" kp="25" ctrllimited="true" ctrlrange="-1.5 0.8"/>
+    <position name="servo_leg2" joint="hip2" kp="25" ctrllimited="true" ctrlrange="-1.5 0.8"/>
+    <position name="servo_leg3" joint="hip3" kp="25" ctrllimited="true" ctrlrange="-1.5 0.8"/>
+    <position name="servo_leg4" joint="hip4" kp="25" ctrllimited="true" ctrlrange="-1.5 0.8"/>
+  </actuator>
+
+</mujoco>

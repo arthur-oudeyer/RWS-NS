@@ -1,5 +1,5 @@
 from random import randint, random, shuffle
-from numpy.random import normal
+from numpy.random import normal, uniform
 from numpy import absolute
 
 def Vcl(f1, v1, f2, v2):
@@ -23,8 +23,8 @@ def proba(percentage):
 def rndChoose(L):
     return L[rndInt(0, len(L) - 1)]
 
-def rndInt(a, b):
-    return a + int(random() * (b - a))
+def rndInt(a, b) -> int :
+    return int(a + round(random() * (b - a)))
 
 def ShuffledOf(L):
     L_shuffled = L[:]

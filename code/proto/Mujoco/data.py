@@ -33,7 +33,7 @@ from saver import save_controller
 # ---------------------------------------------------------------------------
 # Tunable thresholds — adjust to match the robot's actual geometry
 # ---------------------------------------------------------------------------
-STANDING_HEIGHT_THRESHOLD = 0.08   # metres  — torso z below this → fallen
+STANDING_HEIGHT_THRESHOLD = 0.2   # metres  — torso z below this → fallen
 STANDING_TILT_THRESHOLD   = 0.70   # |quat w| — below this → tipped >45° (NOT USED FOR NOW)
 
 
@@ -52,6 +52,7 @@ class Snapshot:
 @dataclass
 class RobotMetrics:
     robot_index:       int
+    nb_legs:           int
     is_standing_start: bool
     is_standing_end:   bool
     displacement_xy:   float           # metres travelled from start to end (XY plane)
@@ -62,7 +63,7 @@ class RobotMetrics:
         status = "UP    " if self.is_standing_end else "FALLEN"
         fell   = f"{self.fell_at_time:.2f}s" if self.fell_at_time is not None else "never"
         return (
-            f"R{self.robot_index:<2}  {status}  "
+            f"R{self.robot_index:<2} {self.nb_legs} legs : {status}  "
             f"disp={self.displacement_xy:+.3f}m  "
             f"speed={self.avg_speed_xy:.3f}m/s  "
             f"fell={fell}"
@@ -76,14 +77,16 @@ class DataManager:
 
     MODES = ("Full", "StartStop")
 
-    def __init__(self, n_robots: int, mode: str = "StartStop", controllers=None, save_best: tuple[bool, bool] = (False, False)):
+    def __init__(self, n_robots: int, mode: str = "StartStop", controllers=None, save_best: tuple[bool, bool] = (False, False), morphologies=None):
         if mode not in self.MODES:
             raise ValueError(f"Unknown mode '{mode}'. Choose from {self.MODES}")
         self.n_robots    = n_robots
         self.mode        = mode
-        self.controllers = controllers   # list[NeuralNetwork] — required when save_best=True
+        self.controllers  = controllers    # list[NeuralNetwork] — required when save_best=True
+        self.morphologies = morphologies   # list[RobotMorphology] — saved alongside networks
         self.save_best, self.save_best_unique = save_best
         self._data: list[list[Snapshot]] = [[] for _ in range(n_robots)]
+        print(f"Data Manager initialized (n={n_robots}, mode={mode}, save_best={self.save_best}, save_unique={self.save_best_unique})")
 
     # ------------------------------------------------------------------
     # Recording
@@ -150,6 +153,7 @@ class DataManager:
 
         return RobotMetrics(
             robot_index       = robot_index,
+            nb_legs           = len(self.morphologies[robot_index].legs),
             is_standing_start = self.is_standing(start.sensors),
             is_standing_end   = self.is_standing(end.sensors),
             displacement_xy   = displacement,
@@ -167,13 +171,17 @@ class DataManager:
     # Summary
     # ------------------------------------------------------------------
     def print_summary(self):
-        metrics  = self.get_all_metrics()
-        standing = sum(1 for m in metrics if m.is_standing_end)
-        best     = max(metrics, key=lambda m: m.displacement_xy)
+        metrics = self.get_all_metrics()
+        standing_count = sum(1 for m in metrics if m.is_standing_end)
+
+        standing_metrics = []
+        for m in metrics:
+            if m.is_standing_end: standing_metrics.append(m)
+        best = max(standing_metrics, key=lambda m: m.displacement_xy)
 
         print(f"\n── Simulation results ({self.mode} mode) ──")
-        print(f"  Standing at end : {standing}/{self.n_robots}")
-        print(f"  Best traveller  : R{best.robot_index} → {best.displacement_xy:.3f} m")
+        print(f"  Standing at end : {standing_count}/{self.n_robots}")
+        print(f"  Best traveller (standing) : R{best.robot_index} → {best.displacement_xy:.3f} m")
         print()
         for m in metrics:
             print(f"  {m}")
@@ -186,9 +194,10 @@ class DataManager:
 
     def _save_last_sim(self):
         save_controller(
-            networks = self.controllers,
-            name     = "last_sim",
-            context  = {"n_robots": self.n_robots, "data_mode": self.mode},
+            networks     = self.controllers,
+            name         = "last_sim",
+            context      = {"n_robots": self.n_robots, "data_mode": self.mode},
+            morphologies = self.morphologies,
         )
 
     def _save_best(self, best: RobotMetrics):
@@ -204,8 +213,7 @@ class DataManager:
             "data_mode":      self.mode,
         }
         network = self.controllers[best.robot_index]
+        morph = [self.morphologies[best.robot_index]] if self.morphologies else None
         if self.save_best_unique:
-            # timestamped archive (never overwritten)
-            save_controller(networks=network, name=datetime.now().strftime("best_%Y%m%d_%H%M%S"), context=context)
-        # always-current shortcut (overwritten each sim)
-        save_controller(networks=network, name="last_best", context=context)
+            save_controller(networks=network, name=datetime.now().strftime("best_%Y%m%d_%H%M%S"), context=context, morphologies=morph)
+        save_controller(networks=network, name="last_best", context=context, morphologies=morph)

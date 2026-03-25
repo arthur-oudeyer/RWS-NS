@@ -1,28 +1,36 @@
-from simplebrain_loc.brain import NeuralNetwork
+from simplebrain_loc.brain import NeuralNetwork, PrintNeuralNetwork
 from simplebrain_loc.bmath import normal
 from saver import load_controller, list_saves
 import numpy as np
+from morphology import RobotMorphology, QUADRIPOD, pad_morphologies
 
 # ---------- Config ------------ #
 NB_INPUT_CLOCKS = 3
-NB_INPUTS = NB_INPUT_CLOCKS + 6 # + 10
-NB_OUTPUTS = 3
-NB_NEURONS_BY_LAYER = (2 * NB_INPUTS, 2 * NB_INPUTS, NB_INPUTS)
-PREDICTION_FACTOR = -2 # tune sensibility
+PREDICTION_FACTOR = -5 # tune sensibility
 # ------------------------------ #
+
+def _nb_inputs(morph: RobotMorphology) -> int:
+    return NB_INPUT_CLOCKS + morph.n_sensor_inputs
+
+def _nb_outputs(morph: RobotMorphology) -> int:
+    return morph.n_outputs
+
+def _nb_neurons(morph: RobotMorphology) -> tuple:
+    #nb_in = _nb_inputs(morph)
+    return (20, 20, 10) # To change ?
 
 controllers = []
 
-def _fresh() -> NeuralNetwork:
-    return NeuralNetwork(NB_INPUTS, NB_OUTPUTS, NB_NEURONS_BY_LAYER)
+def _fresh(morph: RobotMorphology = QUADRIPOD) -> NeuralNetwork:
+    return NeuralNetwork(_nb_inputs(morph), _nb_outputs(morph), _nb_neurons(morph))
 
-def init_simplebrain_controllers(N, init_config=None):
+def init_simplebrain_controllers(N, init_config=None, morphologies=None):
     """
     Initialise the N controllers according to init_config (from sim_config.CONTROLLER_INIT).
 
     init_config formats:
       None              → all fresh
-      "latest"          → load all from the latest best_* save
+      "last_best"          → load all from the latest best_* save
       "last_sim"        → load all from the last_sim save
       {"source": ...,   → load only `indices` from source, rest fresh
        "indices": [...] or "all"}
@@ -30,8 +38,11 @@ def init_simplebrain_controllers(N, init_config=None):
     global controllers
     controllers.clear()
 
+    _morphologies = pad_morphologies(N, morphologies or QUADRIPOD)
+
     if init_config is None:
-        controllers.extend(_fresh() for _ in range(N))
+        print(f"[init morphology] starting fresh controllers.")
+        controllers.extend(_fresh(_morphologies[i]) for i in range(N))
         return
 
     # --- parse config --- (last_sim / last_best)
@@ -47,23 +58,41 @@ def init_simplebrain_controllers(N, init_config=None):
         payload        = load_controller(source)
         saved_networks = payload["networks"]
     except FileNotFoundError:
-        print(f"[init] Save '{source}' not found — starting fresh.")
-        controllers.extend(_fresh() for _ in range(N))
+        print(f"[init brain] Save '{source}' not found — starting fresh.")
+        controllers.extend(_fresh(_morphologies[i]) for i in range(N))
         return
 
     # --- build controller list ---
+    if load_indices == "mutation":
+        # Keep the best (index 0) unchanged, mutate it N-1 times to fill the rest
+        base = NeuralNetwork(copy_from=saved_networks[0])
+        controllers.append(base)
+        for i in range(1, N):
+            controllers.append(Mutate(base, morph=_morphologies[i], amplitude=init_config.get("amplitude"), variation=init_config.get("variation")))
+        print(f"[init brain] Loaded best from '{source}', mutated {N - 1} time(s).")
+        return
+
     if load_indices == "all":
         load_indices = list(range(min(N, len(saved_networks))))
 
     load_set = set(load_indices)
     for i in range(N):
+        morph = _morphologies[i]
         if i in load_set and i < len(saved_networks):
-            controllers.append(NeuralNetwork(copy_from=saved_networks[i]))
+            net = NeuralNetwork(copy_from=saved_networks[i])
+            # Check dimensions match this robot's morphology
+            if net.nb_inputs != _nb_inputs(morph) or net.nb_outputs != _nb_outputs(morph):
+                print(f"[init brain] R{i}: saved dimensions ({net.nb_inputs}in, {net.nb_outputs}out) "
+                      f"don't match morphology {morph.name} "
+                      f"({_nb_inputs(morph)}in, {_nb_outputs(morph)}out) — creating fresh.")
+                controllers.append(_fresh(morph))
+            else:
+                controllers.append(net)
         else:
-            controllers.append(_fresh())
+            controllers.append(_fresh(morph))
 
     loaded = len(load_set & set(range(len(saved_networks))))
-    print(f"[init] Loaded {loaded} controller(s) from '{source}', {N - loaded} fresh.")
+    print(f"[init brain] Loaded {loaded} controller(s) from '{source}', {N - loaded} fresh.")
 
 def get_input_clocks(time):
     return np.sin(time * 15 / 3.142), np.sin(time * 5 / 3.142), np.sin(time * 1 / 3.142)
@@ -78,7 +107,7 @@ def get_simplebrain_controller():
 
     return controller
 
-def Mutate(network: NeuralNetwork, amplitude=0.1, variation=0.01):
+def Mutate(network: NeuralNetwork, morph: RobotMorphology, amplitude=0.1, variation=0.01):
     new_network = NeuralNetwork(copy_from=network)
 
     for l, new_layer in enumerate(new_network.layers):
@@ -86,6 +115,16 @@ def Mutate(network: NeuralNetwork, amplitude=0.1, variation=0.01):
             old_neuron = network.getNeuron(l, n)
             new_neuron.weights = old_neuron.weights[:] + amplitude * normal(0, variation, len(old_neuron.weights))
             new_neuron.bias = old_neuron.bias + amplitude * normal(0, variation)
+
+    while new_network.nb_inputs < _nb_inputs(morph):
+        new_network.NewInput()
+    while new_network.nb_inputs > NB_INPUT_CLOCKS + morph.n_sensor_inputs:
+        new_network.RemoveInput()
+
+    while new_network.nb_outputs < _nb_outputs(morph):
+        new_network.NewOutput()
+    while new_network.nb_outputs > _nb_outputs(morph):
+        new_network.RemoveOutput(rnd=True)
 
     return new_network
 
