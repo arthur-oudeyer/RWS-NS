@@ -12,10 +12,9 @@ Run with: mjpython tripod_sim.py
 import time
 import contextlib
 
-import mujoco
 import mujoco.viewer
 import numpy as np
-from colorama import Fore, Back, Style
+from colorama import Fore, Style
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Brain'))
@@ -66,7 +65,7 @@ else:
 # One independent physics state per robot
 # ---------------------------------------------------------------------------
 robot_states = [mujoco.MjData(robot_models[i]) for i in range(N)]
-data_manager = DataManager(N, mode=DATA_MODE, controllers=nn_controllers, save_best=(SAVE_BEST, UNIQUE_SAVE_BEST), morphologies=robot_morphologies)
+data_manager = DataManager(N, mode=DATA_MODE, controllers=nn_controllers, save_best=(SAVE_BEST, UNIQUE_SAVE_BEST, CLEAR_ARCHIVE), morphologies=robot_morphologies)
 
 # ---------------------------------------------------------------------------
 # Optional: display and recorder (only created when their flag is ON)

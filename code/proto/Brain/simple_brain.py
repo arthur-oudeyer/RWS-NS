@@ -2,6 +2,7 @@ from simplebrain_loc.brain import NeuralNetwork, PrintNeuralNetwork
 from simplebrain_loc.bmath import normal
 from saver import load_controller, list_saves
 import numpy as np
+import random
 from morphology import RobotMorphology, QUADRIPOD, pad_morphologies
 
 # ---------- Config ------------ #
@@ -64,12 +65,17 @@ def init_simplebrain_controllers(N, init_config=None, morphologies=None):
 
     # --- build controller list ---
     if load_indices == "mutation":
-        # Keep the best (index 0) unchanged, mutate it N-1 times to fill the rest
-        base = NeuralNetwork(copy_from=saved_networks[0])
-        controllers.append(base)
-        for i in range(1, N):
-            controllers.append(Mutate(base, morph=_morphologies[i], amplitude=init_config.get("amplitude"), variation=init_config.get("variation")))
-        print(f"[init brain] Loaded best from '{source}', mutated {N - 1} time(s).")
+        # All robots pick a random elite as seed and are passed through Mutate() so
+        # their dimensions are always reconciled with their assigned morphology.
+        # Robot 0 uses amplitude=0 (weights unchanged, only dimensions adapted if needed).
+        amp = init_config.get("amplitude") or 0.1
+        var = init_config.get("variation") or 0.01
+        for i in range(N):
+            source_net = random.choice(saved_networks)
+            controllers.append(Mutate(source_net, morph=_morphologies[i],
+                                      amplitude=0.0 if i == 0 else amp,
+                                      variation=var))
+        print(f"[init brain] Loaded {len(saved_networks)} elite(s) from '{source}', filled {N} robot(s).")
         return
 
     if load_indices == "all":
@@ -108,6 +114,8 @@ def get_simplebrain_controller():
     return controller
 
 def Mutate(network: NeuralNetwork, morph: RobotMorphology, amplitude=0.1, variation=0.01):
+    amplitude = amplitude if amplitude is not None else 0.1
+    variation = variation if variation is not None else 0.01
     new_network = NeuralNetwork(copy_from=network)
 
     for l, new_layer in enumerate(new_network.layers):

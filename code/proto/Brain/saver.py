@@ -6,22 +6,26 @@ Save and load NeuralNetwork controllers to/from disk.
 Weights and biases are serialised explicitly (not the NeuralNetwork object
 itself) so saves remain valid even if the NeuralNetwork class changes.
 
+Save format v2.0 — each robot is stored as a self-contained (network, morphology)
+pair so heterogeneous populations are represented correctly.
+
 Usage:
     from saver import save_controller, load_controller
     from simplebrain_loc.brain import NeuralNetwork
 
     # Save a list of networks with metadata
     save_controller(
-        networks   = controllers,          # list[NeuralNetwork]
-        name       = "gen_42",
-        context    = {"generation": 42, "best_score": 3.7}
+        networks     = controllers,          # list[NeuralNetwork]
+        name         = "gen_42",
+        context      = {"generation": 42, "best_score": 3.7},
+        morphologies = robot_morphologies,   # list[RobotMorphology] — optional
     )
 
     # Load back
-    payload = load_controller("gen_42")
-    architecture = payload["architecture"]
-    context      = payload["context"]
-    networks     = payload["networks"]    # list[NeuralNetwork], ready to use
+    payload      = load_controller("gen_42")
+    networks     = payload["networks"]      # list[NeuralNetwork], ready to use
+    morphologies = payload["morphologies"]  # list[RobotMorphology]
+    context      = payload["context"]       # score, robot_index, …
 """
 
 import os
@@ -74,43 +78,27 @@ def _dict_to_network(d: dict) -> NeuralNetwork:
 
 
 # ---------------------------------------------------------------------------
-# Morphology serialisation helpers
-# ---------------------------------------------------------------------------
-def _save_morphologies(morphologies, n_networks: int) -> list:
-    """Convert morphologies to plain dicts for storage. Returns [] if None."""
-    if not morphologies:
-        return []
-    from morphology import morphology_to_dict
-    if not isinstance(morphologies, list):
-        morphologies = [morphologies] * n_networks
-    return [morphology_to_dict(m) for m in morphologies]
-
-
-def _load_morphologies(raw: list) -> list:
-    """Reconstruct RobotMorphology objects from stored dicts."""
-    if not raw:
-        return []
-    from morphology import dict_to_morphology
-    return [dict_to_morphology(d) for d in raw]
-
-
-# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 def save_controller(
     networks:     list[NeuralNetwork] | NeuralNetwork,
     name:         str,
     context:      dict = None,
-    morphologies: list = None,   # list[RobotMorphology] — saved alongside networks
+    morphologies: list = None,
 ) -> str:
     """
-    Serialise one or several NeuralNetworks to  saves/<name>.pkl
+    Serialise one or several NeuralNetworks to  saves/<name>.pkl  (format v2.0).
+
+    Each robot is stored as a self-contained (network, morphology) pair so
+    heterogeneous populations — where every robot may have a different body
+    and thus different input/output dimensions — are represented correctly.
 
     Parameters
     ----------
-    networks  : single NeuralNetwork or list of NeuralNetworks
-    name      : filename stem (no extension), e.g. "gen_42"
-    context   : any extra metadata to store (generation, score, config…)
+    networks     : single NeuralNetwork or list of NeuralNetworks
+    name         : filename stem (no extension), e.g. "gen_42"
+    context      : any extra metadata to store (generation, score, config…)
+    morphologies : list[RobotMorphology] aligned with networks, or None
 
     Returns
     -------
@@ -119,20 +107,26 @@ def save_controller(
     if isinstance(networks, NeuralNetwork):
         networks = [networks]
 
-    first = networks[0]
+    if morphologies is not None and not isinstance(morphologies, list):
+        morphologies = [morphologies] * len(networks)
+
+    if morphologies is not None:
+        from morphology import morphology_to_dict
+        morph_dicts = [morphology_to_dict(m) for m in morphologies]
+    else:
+        morph_dicts = [None] * len(networks)
 
     payload = {
-        "version":      "1.0",
-        "saved_at":     datetime.now().isoformat(timespec="seconds"),
-        "context":      context or {},
-        "architecture": {
-            "nb_inputs":           first.nb_inputs,
-            "nb_outputs":          first.nb_outputs,
-            "nb_neurons_by_layer": list(first.nb_neurons_by_layer),
-            "n_networks":          len(networks),
-        },
-        "networks":     [_network_to_dict(n) for n in networks],
-        "morphologies": _save_morphologies(morphologies, len(networks)),
+        "version":  "2.0",
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "context":  context or {},
+        "robots": [
+            {
+                "network":    _network_to_dict(net),
+                "morphology": morph_dicts[i],
+            }
+            for i, net in enumerate(networks)
+        ],
     }
 
     os.makedirs(SAVES_DIR, exist_ok=True)
@@ -140,7 +134,7 @@ def save_controller(
     with open(path, "wb") as f:
         pickle.dump(payload, f)
 
-    print(f"[saver] Saved {len(networks)} network(s) → {name}.pkl")
+    print(f"[saver] Saved {len(networks)} robot(s) → {name}.pkl")
     return path
 
 
@@ -148,11 +142,13 @@ def load_controller(name: str) -> dict:
     """
     Load a saved controller from  saves/<name>.pkl
 
+    Supports both v2.0 (per-robot entries) and v1.0 (parallel lists) files.
+
     Returns a dict with keys:
-      "architecture"  — nb_inputs, nb_outputs, nb_neurons_by_layer, n_networks
       "context"       — metadata stored at save time
       "saved_at"      — ISO timestamp string
       "networks"      — list[NeuralNetwork], ready to use
+      "morphologies"  — list[RobotMorphology] (empty list if not stored)
 
     Parameters
     ----------
@@ -165,13 +161,27 @@ def load_controller(name: str) -> dict:
     with open(path, "rb") as f:
         payload = pickle.load(f)
 
-    networks = [_dict_to_network(d) for d in payload["networks"]]
-    morphologies = _load_morphologies(payload.get("morphologies", []))
+    version = payload.get("version", "1.0")
 
-    print(f"[saver] Loaded {len(networks)} network(s) and {len(morphologies)} morphologies(s) from {name}.pkl  (saved {payload['saved_at']})")
+    if version == "2.0":
+        network_dicts  = [r["network"]    for r in payload["robots"]]
+        morph_dicts    = [r["morphology"] for r in payload["robots"]]
+    else:
+        # v1.0 backward-compat: parallel lists
+        network_dicts = payload["networks"]
+        morph_dicts   = payload.get("morphologies") or [None] * len(network_dicts)
+
+    networks = [_dict_to_network(d) for d in network_dicts]
+
+    if any(m is not None for m in morph_dicts):
+        from morphology import dict_to_morphology
+        morphologies = [dict_to_morphology(m) if m is not None else None for m in morph_dicts]
+    else:
+        morphologies = []
+
+    print(f"[saver] Loaded {len(networks)} robot(s) from {name}.pkl  (v{version}, saved {payload['saved_at']})")
 
     return {
-        "architecture": payload["architecture"],
         "context":      payload["context"],
         "saved_at":     payload["saved_at"],
         "networks":     networks,
@@ -184,3 +194,18 @@ def list_saves() -> list[str]:
     if not os.path.isdir(SAVES_DIR):
         return []
     return [f[:-4] for f in os.listdir(SAVES_DIR) if f.endswith(".pkl")]
+
+
+def clear_save(name: str) -> bool:
+    """
+    Delete the save file  saves/<name>.pkl  if it exists.
+
+    Returns True if the file was deleted, False if it did not exist.
+    """
+    path = os.path.join(SAVES_DIR, f"{name}.pkl")
+    if os.path.exists(path):
+        os.remove(path)
+        print(f"[saver] Cleared save: {name}.pkl")
+        return True
+    print(f"[saver] Nothing to clear — '{name}.pkl' does not exist.")
+    return False

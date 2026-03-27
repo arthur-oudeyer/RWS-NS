@@ -19,6 +19,7 @@ from typing import Optional
 
 from simplebrain_loc.bmath import normal, uniform, rndInt, proba
 
+MAX_INIT_LEGS = 6
 
 # ---------------------------------------------------------------------------
 # Descriptors
@@ -119,6 +120,20 @@ HEXAPOD = RobotMorphology(
     torso_radius=0.14,
 )
 
+def NewMorph(name="new_morph", legs: list[LegDescriptor] = None, torso_radius: float = 0.14, n_legs: int = 0) -> RobotMorphology :
+
+    if legs is None:
+        l = []
+        for i in range(n_legs if n_legs > 0 else rndInt(1, MAX_INIT_LEGS)):
+            l.append(LegDescriptor(rndInt(0, 360), [JointDescriptor(rgba=(uniform(0.1, 0.9), uniform(0.1, 0.9), uniform(0.1, 0.9), 1.0), length=uniform(0.1, 0.4))]))
+    else:
+        l = legs
+
+    return RobotMorphology(
+        name=name,
+        legs=l,
+        torso_radius=torso_radius,
+    )
 
 # ---------------------------------------------------------------------------
 # Serialisation helpers (used by saver.py)
@@ -177,11 +192,10 @@ def resolve_morphologies(
     are used (so the physics + brain always match what was saved).
     Otherwise default_morphologies is used.
     """
-    saved_morph = pad_morphologies(n, default_morphologies)
 
     if controller_init is None:
         print(f"[init morphology] starting default morphologies.")
-        return saved_morph
+        return pad_morphologies(n, default_morphologies)
 
     if isinstance(controller_init, str):
         source       = controller_init
@@ -206,13 +220,16 @@ def resolve_morphologies(
 
     # --- build controller list ---
     if load_indices == "mutation":
-        # Keep the best (index 0) unchanged, mutate it N-1 times to fill the rest
-        base = saved_morph[0]
-        morphs = [base]
+        # Robot 0: copy of a random elite (unchanged seed)
+        # Robots 1..N-1: each mutated from a randomly chosen elite
+        import random
+        seed = random.choice(saved_morph)
+        morphs = [seed]
         for _ in range(n - 1):
+            source_morph = random.choice(saved_morph)
             morphs.append(
-                MutateMorphology(base, amplitude=controller_init.get("morph_amp"), variation=controller_init.get("morph_var"), morph_mod=controller_init.get("morph_mod")))
-        print(f"[init morphology] Loaded best from '{source}', mutated {n - 1} time(s).")
+                MutateMorphology(source_morph, amplitude=controller_init.get("morph_amp"), variation=controller_init.get("morph_var"), morph_mod=controller_init.get("morph_mod")))
+        print(f"[init morphology] Loaded {len(saved_morph)} elite(s) from '{source}', mutated {n - 1} time(s).")
         return morphs
 
     if load_indices == "all":
@@ -233,7 +250,7 @@ def resolve_morphologies(
 def MutateMorphology(base: RobotMorphology, amplitude, variation, morph_mod):
     new = copy.deepcopy(base)
     if proba(morph_mod * 100):
-        if proba(50) : # New leg
+        if len(new.legs) < MAX_INIT_LEGS + 2 and proba(50): # New leg
             new.legs.append(LegDescriptor(uniform(0, 360), [JointDescriptor(rgba=(uniform(0.1, 0.9), uniform(0.1, 0.9), uniform(0.1, 0.9), 1.0), length=uniform(0.15, 0.35))]))
         else: # Remove leg
             if len(new.legs) > 1:
@@ -253,6 +270,9 @@ def pad_morphologies(n: int, morphologies) -> list[RobotMorphology]:
     - If morphologies is a single RobotMorphology → replicate n times.
     - If it's a list shorter than n → pad with last element.
     """
+    if morphologies is None:
+        return [NewMorph() for _ in range(n)]
+
     if isinstance(morphologies, RobotMorphology):
         return [morphologies] * n
     result = list(morphologies)

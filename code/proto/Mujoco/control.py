@@ -31,12 +31,14 @@ from morphology import resolve_morphologies
 # ---------------------------------------------------------------------------
 @dataclass
 class RobotSensorData:
-    torso_pos:         np.ndarray   # (3,)      world position  [x, y, z]  (metres)
-    torso_height:      float        # z only  — convenience shortcut for torso_pos[2]
-    torso_orientation: np.ndarray   # (4,)      quaternion [w, x, y, z]
-    torso_velocity:    np.ndarray   # (3,)      linear velocity  [vx, vy, vz]  (m/s)
-    hip_angles:        np.ndarray   # (N_HIP,)  hip joint angles  (rad)
-    hip_velocities:    np.ndarray   # (N_HIP,)  hip angular velocities  (rad/s)
+    torso_pos:              np.ndarray   # (3,)  world position  [x, y, z]  (metres)
+    torso_height:           float        # z only — convenience shortcut for torso_pos[2]
+    torso_orientation:      np.ndarray   # (4,)  quaternion [w, x, y, z]
+    torso_velocity:         np.ndarray   # (3,)  linear velocity  [vx, vy, vz]  (m/s)
+    torso_angular_velocity: np.ndarray   # (3,)  angular velocity [wx, wy, wz]  (rad/s)
+    com_pos:                np.ndarray   # (3,)  whole-robot center of mass  [x, y, z]  (metres)
+    hip_angles:             np.ndarray   # (N_HIP,)  hip joint angles  (rad)
+    hip_velocities:         np.ndarray   # (N_HIP,)  hip angular velocities  (rad/s)
 
     def __str__(self) -> str:
         def fmt_vec(v):
@@ -52,6 +54,8 @@ class RobotSensorData:
             f"y={self.torso_orientation[2]:+.2f}  "
             f"z={self.torso_orientation[3]:+.2f}]\n"
             f"  torso_vel    : {fmt_vec(self.torso_velocity)} m/s\n"
+            f"  torso_ω      : {fmt_vec(self.torso_angular_velocity)} rad/s\n"
+            f"  com_pos      : {fmt_vec(self.com_pos)} m\n"
             f"  hip_angles   : {fmt_vec(self.hip_angles)} rad"
             f"  ({fmt_vec(hip_deg)} °)\n"
             f"  hip_velocities: {fmt_vec(self.hip_velocities)} rad/s"
@@ -88,12 +92,14 @@ def read_robot_sensors(state: mujoco.MjData, n_joints: int) -> RobotSensorData:
     _HIP_QVEL = 6           # freejoint always occupies qvel[0:6]
 
     return RobotSensorData(
-        torso_pos         = state.qpos[0:3].copy(),
-        torso_height      = float(state.qpos[2]),
-        torso_orientation = state.qpos[3:7].copy(),
-        torso_velocity    = state.qvel[0:3].copy(),
-        hip_angles        = state.qpos[_HIP_QPOS : _HIP_QPOS + n_joints].copy(),
-        hip_velocities    = state.qvel[_HIP_QVEL : _HIP_QVEL + n_joints].copy(),
+        torso_pos              = state.qpos[0:3].copy(),
+        torso_height           = float(state.qpos[2]),
+        torso_orientation      = state.qpos[3:7].copy(),
+        torso_velocity         = state.qvel[0:3].copy(),
+        torso_angular_velocity = state.qvel[3:6].copy(),
+        com_pos                = state.subtree_com[1].copy(),
+        hip_angles             = state.qpos[_HIP_QPOS : _HIP_QPOS + n_joints].copy(),
+        hip_velocities         = state.qvel[_HIP_QVEL : _HIP_QVEL + n_joints].copy(),
     )
 
 if ROBOT_CONTROL == "pre-configured":

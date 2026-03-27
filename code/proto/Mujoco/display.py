@@ -26,7 +26,6 @@ import xml.etree.ElementTree as ET
 from typing import List
 
 import mujoco
-import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Brain'))
 from morphology import MorphologyManager, RobotMorphology

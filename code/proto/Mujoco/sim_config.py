@@ -16,7 +16,7 @@ VIEWER_ON = True
 VIDEO_RENDERER_ON = False
 
 DATA_MODE = "Full" # StartStop / Full
-SAVE_BEST = True # Create a "last_best.pkl"
+SAVE_BEST = False # Create a "last_best.pkl"
 UNIQUE_SAVE_BEST = False # Create a "best_392304702147.pkl"
 
 SHOW_LIVE_POS_ON = False
@@ -24,7 +24,7 @@ SHOW_LIVE_POS_ON = False
 # ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
-N                   = 100    # number of robots to simulate in parallel
+N                   = 11    # number of robots to simulate in parallel
 ROBOT_SPACING       = 1.    # distance between robots in the viewer (metres)
 SIMULATION_DURATION = 5.0    # seconds
 ROBOT_CONTROL = "external"    # pre-configured / external
@@ -42,16 +42,18 @@ ROBOT_CONTROL = "external"    # pre-configured / external
 # {"source": "last_best",                 → load all from the latest best robot saved and mutate it according to parameter
 #  "indices": "mutation",
 #  "amplitude": 0.2, "variation": 0.1}
-CONTROLLER_INIT = {"source": "last_best", "indices": "mutation", "amplitude": 0.2, "variation": 0.2, "morph_amp": 0.1, "morph_var": 0.3, "morph_mod": 0.2}
+CONTROLLER_INIT = "last_best" #{"source": "last_best", "indices": "mutation", "amplitude": 0.3, "variation": 0.3, "morph_amp": 0.2, "morph_var": 0.3, "morph_mod": 0.25}
+CLEAR_ARCHIVE = False
 
 # ---------------------------------------------------------------------------
 # Morphology
 # ---------------------------------------------------------------------------
 # One RobotMorphology, or a list (padded to length N with the last entry).
-# Pre-defined: QUADRIPOD (4 legs), TRIPOD (3 legs), HEXAPOD (6 legs)
+# Pre-defined: QUADRIPOD (4 legs), TRIPOD (3 legs), HEXAPOD (6 legs), None (random)
 # Example mixed population:
 #   MORPHOLOGIES = [QUADRIPOD] * 15 + [TRIPOD] * 10
-MORPHOLOGIES = [TRIPOD] * 33 + [QUADRIPOD] * 33 + [HEXAPOD] * 33
+MORPHOLOGIES = None #[TRIPOD] * 33 + [QUADRIPOD] * 33 + [HEXAPOD] * 33
+MAX_LEGS = 6
 
 # ---------------------------------------------------------------------------
 # Paths
