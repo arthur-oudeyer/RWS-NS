@@ -53,7 +53,7 @@ class RobotMorphology:
     legs:          list[LegDescriptor]
     torso_radius:  float = 0.12                    # cylinder radius (m)
     torso_height:  float = 0.04                    # cylinder half-height (m)
-    torso_rgba:    tuple = (0.4, 0.4, 0.5, 1.0)
+    torso_rgba:    tuple = (0.9, 0.9, 0.9, 1.0)
     spawn_height:  float = 0.5                     # initial Z position (m)
     foot_radius:   float = 0.038
     foot_rgba:     tuple = (0.9, 0.7, 0.2, 1.0)
@@ -223,13 +223,12 @@ def resolve_morphologies(
         # Robot 0: copy of a random elite (unchanged seed)
         # Robots 1..N-1: each mutated from a randomly chosen elite
         import random
-        seed = random.choice(saved_morph)
-        morphs = [seed]
-        for _ in range(n - 1):
+        morphs = []
+        for _ in range(n):
             source_morph = random.choice(saved_morph)
             morphs.append(
                 MutateMorphology(source_morph, amplitude=controller_init.get("morph_amp"), variation=controller_init.get("morph_var"), morph_mod=controller_init.get("morph_mod")))
-        print(f"[init morphology] Loaded {len(saved_morph)} elite(s) from '{source}', mutated {n - 1} time(s).")
+        print(f"[init morphology] Loaded {len(saved_morph)} elite(s) from '{source}', mutated randomly {n} time(s).")
         return morphs
 
     if load_indices == "all":
@@ -296,12 +295,19 @@ class MorphologyManager:
                    If None, built-in defaults are used.
     """
 
-    def __init__(self, env_xml_path: Optional[str] = None):
-        self._env_xml_path = env_xml_path
+    def __init__(self, env_xml_path: Optional[str] = None, floor_texrepeat: int = 64):
+        self._env_xml_path    = env_xml_path
+        self.floor_texrepeat  = floor_texrepeat
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _apply_texrepeat(self, asset_elem: ET.Element) -> None:
+        """Patch the floor material's texrepeat in-place after an asset block is copied."""
+        mat = asset_elem.find(".//material[@name='floor_material']")
+        if mat is not None:
+            mat.set("texrepeat", f"{self.floor_texrepeat} {self.floor_texrepeat}")
 
     @staticmethod
     def _rgba(rgba: tuple) -> str:
@@ -448,7 +454,10 @@ class MorphologyManager:
             for tag in ("option", "visual", "asset"):
                 elem = env.find(tag)
                 if elem is not None:
-                    root.append(copy.deepcopy(elem))
+                    copied = copy.deepcopy(elem)
+                    if tag == "asset":
+                        self._apply_texrepeat(copied)
+                    root.append(copied)
         else:
             option = ET.SubElement(root, "option", timestep="0.005", gravity="0 0 -9.81")
             visual = ET.SubElement(root, "visual")
@@ -459,7 +468,8 @@ class MorphologyManager:
                 builtin="checker", rgb1="0.3 0.3 0.3", rgb2="0.2 0.2 0.2",
                 width="512", height="512")
             ET.SubElement(asset, "material", name="floor_material",
-                texture="floor_texture", texrepeat="64 64")
+                texture="floor_texture",
+                texrepeat=f"{self.floor_texrepeat} {self.floor_texrepeat}")
 
         worldbody = ET.SubElement(root, "worldbody")
         ET.SubElement(worldbody, "light", pos="0 0 3", dir="0 0 -1", diffuse="0.8 0.8 0.8")

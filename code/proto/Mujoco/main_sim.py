@@ -38,13 +38,17 @@ print(f"Video render  : {'ON' if VIDEO_RENDERER_ON else 'OFF'}\n" + Style.RESET_
 # Load the physics model (one robot, shared across all simulations)
 # ---------------------------------------------------------------------------
 print(Fore.YELLOW + f"Building robots models ({N}, {CONTROLLER_INIT})...")
-morph_manager      = MorphologyManager(env_xml_path=str(PHYSICS_XML))
+morph_manager      = MorphologyManager(env_xml_path=str(PHYSICS_XML), floor_texrepeat=FLOOR_TEXREPEAT)
 robot_morphologies = resolve_morphologies(N, CONTROLLER_INIT, MORPHOLOGIES)
+for m in robot_morphologies:
+    m.torso_rgba = (0.9, 0.9, 0.9, 1.0)
 robot_models       = [morph_manager.get_model(m) for m in robot_morphologies]
 for model in robot_models:
     model.opt.iterations = 100
     model.opt.ls_iterations = 50
     model.opt.timestep = 0.005
+    model.vis.global_.offwidth  = RENDER_WIDTH
+    model.vis.global_.offheight = RENDER_HEIGHT
 
 print(f"\nSetup Controllers ({N}, {CONTROLLER_INIT})..")
 init_robots_controllers(robot_morphologies)
@@ -76,7 +80,7 @@ display = DisplayManager(
     robot_states      = robot_states,
     morph_manager     = morph_manager,
 ) if VIEWER_ON else None
-recorder = VideoRecorder(n=N, physics_model=robot_models[0]) if VIDEO_RENDERER_ON else None
+recorder = VideoRecorder(n=N, physics_models=robot_models) if VIDEO_RENDERER_ON else None
 
 # ---------------------------------------------------------------------------
 # Simulation loop — runs with or without viewer using a null context manager

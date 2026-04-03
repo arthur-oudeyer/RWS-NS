@@ -35,20 +35,23 @@ class VideoRecorder:
     Encoding  (writer.append_data) happens in a background thread.
     """
 
-    def __init__(self, n: int, physics_model: mujoco.MjModel):
+    def __init__(self, n: int, physics_models: List[mujoco.MjModel]):
         self.n = n
 
         # Steps to skip between frames so the video plays at VIDEO_FPS
-        self.render_interval = max(1, round(1.0 / (VIDEO_FPS * physics_model.opt.timestep)))
-        self.actual_fps      = 1.0 / (self.render_interval * physics_model.opt.timestep)
+        self.render_interval = max(1, round(1.0 / (VIDEO_FPS * physics_models[0].opt.timestep)))
+        self.actual_fps      = 1.0 / (self.render_interval * physics_models[0].opt.timestep)
 
-        # One renderer, reused for every robot each frame
-        self.renderer = mujoco.Renderer(physics_model, height=RENDER_HEIGHT, width=RENDER_WIDTH)
+        # One renderer per robot — each must match its own model
+        self.renderers = [
+            mujoco.Renderer(physics_models[i], height=RENDER_HEIGHT, width=RENDER_WIDTH)
+            for i in range(n)
+        ]
 
         self.camera = mujoco.MjvCamera()
-        self.camera.azimuth   = 45
-        self.camera.elevation = -25
-        self.camera.distance  = 1.8
+        self.camera.azimuth   = 0
+        self.camera.elevation = -15.0
+        self.camera.distance  = 3.
         self.camera.lookat[:] = [0.0, 0.0, 0.3]
 
         RENDER_DIR.mkdir(exist_ok=True)
@@ -60,6 +63,7 @@ class VideoRecorder:
                 str(RENDER_DIR / f"r{i}.mp4"),
                 fps=self.actual_fps,
                 codec="libx264",
+                macro_block_size=1,
                 output_params=["-preset", "ultrafast", "-crf", "28"],
             )
             for i in range(n)
@@ -70,7 +74,7 @@ class VideoRecorder:
         self._thread = threading.Thread(target=self._encoder_worker, daemon=True)
         self._thread.start()
 
-        print(f"VideoRecorder initialized : {n} files → {RENDER_DIR} | {self.actual_fps:.0f} fps | {RENDER_WIDTH}×{RENDER_HEIGHT} | ultrafast | async encoding")
+        print(f"VideoRecorder initialized : {n} files → {RENDER_DIR} | {self.actual_fps:.0f} fps | {RENDER_WIDTH}×{RENDER_HEIGHT} | ultrafast | async encoding | 1 renderer/robot")
 
     def _encoder_worker(self):
         """Runs in background — encodes frames without blocking the sim loop."""
@@ -90,8 +94,8 @@ class VideoRecorder:
             return
 
         for i, state in enumerate(robot_states):
-            self.renderer.update_scene(state, camera=self.camera)
-            frame = self.renderer.render().copy()   # copy so the buffer is safe to hand off
+            self.renderers[i].update_scene(state, camera=self.camera)
+            frame = self.renderers[i].render().copy()   # copy so the buffer is safe to hand off
             self._queue.put((i, frame))
 
     def close(self):
@@ -101,5 +105,6 @@ class VideoRecorder:
 
         for writer in self.writers:
             writer.close()
-        self.renderer.close()
+        for renderer in self.renderers:
+            renderer.close()
         print(f"Videos saved to {RENDER_DIR}/")

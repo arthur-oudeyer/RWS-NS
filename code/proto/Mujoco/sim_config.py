@@ -13,10 +13,10 @@ from morphology import QUADRIPOD, TRIPOD, HEXAPOD, RobotMorphology
 # Feature Activation
 # ---------------------------------------------------------------------------
 VIEWER_ON = True
-VIDEO_RENDERER_ON = False
+VIDEO_RENDERER_ON = True
 
 DATA_MODE = "Full" # StartStop / Full
-SAVE_BEST = False # Create a "last_best.pkl"
+SAVE_BEST = False # Create a "last_best.pkl" according to descriptor
 UNIQUE_SAVE_BEST = False # Create a "best_392304702147.pkl"
 
 SHOW_LIVE_POS_ON = False
@@ -24,7 +24,7 @@ SHOW_LIVE_POS_ON = False
 # ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
-N                   = 11    # number of robots to simulate in parallel
+N                   = 13    # number of robots to simulate in parallel
 ROBOT_SPACING       = 1.    # distance between robots in the viewer (metres)
 SIMULATION_DURATION = 5.0    # seconds
 ROBOT_CONTROL = "external"    # pre-configured / external
@@ -42,7 +42,7 @@ ROBOT_CONTROL = "external"    # pre-configured / external
 # {"source": "last_best",                 → load all from the latest best robot saved and mutate it according to parameter
 #  "indices": "mutation",
 #  "amplitude": 0.2, "variation": 0.1}
-CONTROLLER_INIT = "last_best" #{"source": "last_best", "indices": "mutation", "amplitude": 0.3, "variation": 0.3, "morph_amp": 0.2, "morph_var": 0.3, "morph_mod": 0.25}
+CONTROLLER_INIT = None #"last_best" #{"source": "last_best", "indices": "mutation", "amplitude": 0.3, "variation": 0.3, "morph_amp": 0.2, "morph_var": 0.3, "morph_mod": 0.2}
 CLEAR_ARCHIVE = False
 
 # ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ CLEAR_ARCHIVE = False
 # Pre-defined: QUADRIPOD (4 legs), TRIPOD (3 legs), HEXAPOD (6 legs), None (random)
 # Example mixed population:
 #   MORPHOLOGIES = [QUADRIPOD] * 15 + [TRIPOD] * 10
-MORPHOLOGIES = None #[TRIPOD] * 33 + [QUADRIPOD] * 33 + [HEXAPOD] * 33
+MORPHOLOGIES = None #[TRIPOD] * 40 + [QUADRIPOD] * 40 + [HEXAPOD] * 20
 MAX_LEGS = 6
 
 # ---------------------------------------------------------------------------
@@ -63,9 +63,15 @@ PHYSICS_XML = ROOT_DIR / "quadripod_robot.xml" # tripod_robot.xml / quadripod_ro
 RENDER_DIR  = ROOT_DIR / "render"
 
 # ---------------------------------------------------------------------------
+# Visual
+# ---------------------------------------------------------------------------
+FLOOR_TEXREPEAT = 400   # number of checker tiles across the floor (higher = smaller squares)
+
+# ---------------------------------------------------------------------------
 # Video recording
 # ---------------------------------------------------------------------------
-VIDEO_FPS     = 2    # target frames per second (20 is smooth enough for gait analysis)
-RENDER_WIDTH  = 240   # pixel width of each robot's video
-RENDER_HEIGHT = 192   # pixel height of each robot's video
+VIDEO_FPS     = 10    # target frames per second (20 is smooth enough for gait analysis)
+RENDER_SIZE   = 4
+RENDER_WIDTH  = (RENDER_SIZE + 2) * 120   # pixel width of each robot's video
+RENDER_HEIGHT = RENDER_SIZE * 96   # pixel height of each robot's video
 

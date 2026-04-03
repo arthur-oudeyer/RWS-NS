@@ -57,7 +57,10 @@ def _build_display_xml(
     for tag in ("option", "visual", "asset"):
         elem = env_root.find(tag)
         if elem is not None:
-            display.append(copy.deepcopy(elem))
+            copied = copy.deepcopy(elem)
+            if tag == "asset":
+                morph_manager._apply_texrepeat(copied)
+            display.append(copied)
 
     worldbody = ET.SubElement(display, "worldbody")
     src_worldbody = env_root.find("worldbody")
