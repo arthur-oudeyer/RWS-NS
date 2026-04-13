@@ -1,0 +1,5 @@
+Ollama :
+
+pkill -f ollama
+ollama-start
+ollama run qwen2.5vl:7b "Dis bonjour en une phrase"

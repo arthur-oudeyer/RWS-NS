@@ -6,7 +6,8 @@ import time
 from pathlib import Path
 
 # ── Config ────────────────────────────────────────────────────────────────────
-API_KEY = "AIzaSyC3UE4XryO3WkB9xEWhELND--ueLvy2Ogc"
+from api_keys import APIKEY_GEMINI
+API_KEY = APIKEY_GEMINI
 MODEL   = "gemini-2.5-flash"
 
 client = genai.Client(api_key=API_KEY)
@@ -142,17 +143,67 @@ def score_robot_video(video_path: str) -> dict:
 
     return json.loads(text[start:end])
 
+def ask_question_on_image(image_path: str, question: str) -> dict:
+    if not Path(image_path).exists():
+        print(f"❌ Image not found : {image_path}")
+        sys.exit(1)
+
+    print(f"🎬 Uploading : {image_path}")
+    image_file = client.files.upload(
+        file=image_path,
+        config=types.UploadFileConfig(mime_type="image/png")
+    )
+
+    # Wait for processing
+    print("⏳ Waiting for image processing...")
+    while image_file.state.name == "PROCESSING":
+        time.sleep(1)
+        video_file = client.files.get(name=video_file.name)
+
+    if image_file.state.name == "FAILED":
+        print("❌ image processing failed")
+        sys.exit(1)
+
+    print("✅ Image ready, sending to model...")
+
+    try:
+        prompt = f"""
+                You are looking at frame taken from a 5 second simulation showing a simulated robot composed of a white torso and colored legs. It stands on a black floor, and the background is blue.
+                Focus solely on this question and answer it briefly: 
+                {question}"""
+
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=[
+                types.Part.from_uri(
+                    file_uri=image_file.uri,
+                    mime_type="image/png"
+                ),
+                prompt
+            ]
+        )
+
+        text = response.text
+
+        return text
+    finally:
+        pass
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    video_path = sys.argv[1] if len(sys.argv) > 1 else "./video/walker_slider.mp4"
 
-    result = score_robot_video(video_path)
+    question = "How many legs have the robot ? (hint: count the yellow foot)"
+    resp = ask_question_on_image("./img/mid.png", question)
+    print(f"Question : {question} \nAnswer : {resp}")
 
-    print("✅ Scores :")
-    print(f"  Fallen        : {result.get('fallen')}")
-    print(f"  Fall moment   : {result.get('fall_moment')}")
-    print(f"  Dynamism      : {result.get('dynamism')}/10")
-    print(f"  Stability     : {result.get('stability')}/10")
-    print(f"  Efficiency    : {result.get('efficiency')}/10")
-    print(f"  Interest      : {result.get('interest')}/10")
-    print(f"  Comment       : {result.get('comment')}")
+    # video_path = sys.argv[1] if len(sys.argv) > 1 else "./video/mid.mp4"
+    # result = score_robot_video(video_path)
+    #
+    # print("✅ Scores :")
+    # print(f"  Fallen        : {result.get('fallen')}")
+    # print(f"  Fall moment   : {result.get('fall_moment')}")
+    # print(f"  Dynamism      : {result.get('dynamism')}/10")
+    # print(f"  Stability     : {result.get('stability')}/10")
+    # print(f"  Efficiency    : {result.get('efficiency')}/10")
+    # print(f"  Interest      : {result.get('interest')}/10")
+    # print(f"  Comment       : {result.get('comment')}")

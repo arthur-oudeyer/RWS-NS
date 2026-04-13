@@ -7,6 +7,8 @@ import tempfile
 import shutil
 from pathlib import Path
 
+from Cython.Shadow import returns
+
 
 def extract_frames(video_path: str, n_frames_per_sec: int = 4) -> list[str]:
     """Extrait n frames régulièrement espacées de la vidéo."""
@@ -28,7 +30,7 @@ def extract_frames(video_path: str, n_frames_per_sec: int = 4) -> list[str]:
         sys.exit(1)
 
     frames = sorted(Path(tmp_dir).glob("frame_*.jpg"))
-    print(f"✅ {len(frames)} frames extraites")
+    print(f"✅ {len(frames)} frames extracted")
     return [str(f) for f in frames], tmp_dir
 
 def encode_image(image_path: str) -> str:
@@ -41,7 +43,7 @@ def score_robot_video(video_path: str, n_frames: int = 8) -> dict:
         print(f"❌ Vidéo non trouvée : {video_path}")
         sys.exit(1)
 
-    print(f"🎬 Analyse de : {video_path}")
+    print(f"🎬 Analysing : {video_path}")
 
     # Extraction des frames
     frame_paths, tmp_dir = extract_frames(video_path, n_frames)
@@ -49,7 +51,7 @@ def score_robot_video(video_path: str, n_frames: int = 8) -> dict:
     try:
         # Encodage de toutes les frames
         images_b64 = [encode_image(f) for f in frame_paths]
-        print(f"⏳ Envoi de {len(images_b64)} frames au modèle...")
+        print(f"⏳ Sending {len(images_b64)} frames for the model...")
 
         prompt = f"""Tu regardes {len(images_b64)} frames extraites d'une simulation de 5 secondes montrant un robot sur sol bleu en mouvement. Son objectif est de se déplacé en restant debout sur ses jambes de couleurs différentes. Les frames sont ordonnées chronologiquement.
 
@@ -88,14 +90,14 @@ Réponds UNIQUEMENT avec un JSON valide, sans texte avant ou après, exemple :
     finally:
         # Nettoyage des frames temporaires
         shutil.rmtree(tmp_dir)
-        print("🧹 Frames temporaires supprimées")
+        print("🧹 Temporary Frames suppressed")
 
 def ask_question_on_video(video_path: str, question: str, n_frames: int = 8) -> dict:
     if not Path(video_path).exists():
         print(f"❌ Vidéo non trouvée : {video_path}")
         sys.exit(1)
 
-    print(f"🎬 Analyse de : {video_path}")
+    print(f"🎬 Analysing : {video_path}")
 
     # Extraction des frames
     frame_paths, tmp_dir = extract_frames(video_path, n_frames)
@@ -103,10 +105,10 @@ def ask_question_on_video(video_path: str, question: str, n_frames: int = 8) -> 
     try:
         # Encodage de toutes les frames
         images_b64 = [encode_image(f) for f in frame_paths]
-        print(f"⏳ Envoi de {len(images_b64)} frames au modèle...")
+        print(f"⏳ Sending {len(images_b64)} frames for the model...")
 
         prompt = f"""
-        You are looking at {len(images_b64)} frames taken from a 5 second simulation showing a robot moving on a blue floor. Its goal is to move while remaining upright on its legs, which are of different colors and attached to its gray torso. The frames are arranged in chronological order.
+        You are looking at {len(images_b64)} frames taken from a 5 second simulation showing a simulated robot composed of a white torso and colored legs. It stands on a black floor, and the background is blue. The frames are arranged in chronological order.
         Focus solely on this question and answer it briefly: 
         {question}"""
 
@@ -139,12 +141,12 @@ def ask_question_on_image(image_path: str, question: str) -> dict:
     try:
         # Encodage de toutes les frames
         images_b64 = [encode_image(image_path)]
-        print(f"⏳ Envoi de {len(images_b64)} frames au modèle...")
+        print(f"⏳ Sending {len(images_b64)} frame for the model...")
 
         prompt = f"""
-        You are looking at {len(images_b64)} frames taken from a simulation showing a robot.
-        Focus solely on this question and answer it briefly: 
-        {question}"""
+                You are looking at frame taken from a 5 second simulation showing a simulated robot composed of a white torso and colored legs. It stands on a black floor, and the background is blue.
+                Focus solely on this question and answer it briefly: 
+                {question}"""
 
         response = ollama.chat(
             model="qwen2.5vl:7b",
@@ -183,15 +185,16 @@ def model_test(model) -> dict:
 if __name__ == "__main__":
     model_test("qwen2.5vl:7b")
 
-    #resp = ask_question_on_image("robot.png", "What do you see ?")
-    #print(f"Question : {"What do you see ?"} \nAnswer : {resp}")
-
-    video_path = sys.argv[1] if len(sys.argv) > 1 else "fall_1.mp4"
-    n_frames_per_sec = int(sys.argv[2]) if len(sys.argv) > 2 else 2
-
-    question = "Did the robot fall ? (fallen = not moving and torso touching the ground)"
-    resp = ask_question_on_video(video_path, question, n_frames_per_sec)
+    question = "How many legs have the robot ? (hint: count the yellow foot)"
+    resp = ask_question_on_image("./img/mid.png", question)
     print(f"Question : {question} \nAnswer : {resp}")
+
+    # video_path = sys.argv[1] if len(sys.argv) > 1 else "video/mid.mp4"
+    # n_frames_per_sec = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+    #
+    # question = "How many legs have the robot ? (hint: count the yellow foot)"
+    # resp = ask_question_on_video(video_path, question, n_frames_per_sec)
+    # print(f"Question : {question} \nAnswer : {resp}")
 
     # result = score_robot_video(video_path, n_frames_per_sec)
     #
