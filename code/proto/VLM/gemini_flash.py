@@ -8,7 +8,7 @@ from pathlib import Path
 # ── Config ────────────────────────────────────────────────────────────────────
 from api_keys import APIKEY_GEMINI
 API_KEY = APIKEY_GEMINI
-MODEL   = "gemini-2.5-flash"
+MODEL   = "gemini-3.1-flash-lite-preview"
 
 client = genai.Client(api_key=API_KEY)
 
@@ -192,8 +192,8 @@ def ask_question_on_image(image_path: str, question: str) -> dict:
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
 
-    question = "How many legs have the robot ? (hint: count the yellow foot)"
-    resp = ask_question_on_image("./img/mid.png", question)
+    question = "How many legs have the robot ? (hint: count the yellow ball that are the foot)"
+    resp = ask_question_on_image("./img/spider.png", question)
     print(f"Question : {question} \nAnswer : {resp}")
 
     # video_path = sys.argv[1] if len(sys.argv) > 1 else "./video/mid.mp4"

@@ -1,6 +1,9 @@
 **/.DS_Store
 **/*.mp4
+**/*.png
 **/*.pyc
+**/*.json
+**/*.jsonl
 **/*.pkl
 **/__pycache__/
 **/*.icloud

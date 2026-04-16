@@ -1,0 +1,429 @@
+"""
+archive.py
+==========
+Population storage for the two evolution strategies.
+
+MuLambdaArchive
+---------------
+Maintains a population of μ parents.  Each generation:
+  - update(results) receives μ+λ MorphologyResults (parents + offspring)
+  - Keeps the best μ by fitness → new population
+  - Records per-generation statistics (fitness mean, std, best)
+
+MapEliteArchive
+---------------
+Maintains a grid where each cell holds the best-scoring individual
+for a combination of feature descriptors.  Each generation:
+  - update(results) inserts or replaces cells if the new individual
+    scores higher
+  - Any filled cell can be selected as a mutation parent
+
+Feature dimensions (MapElite)
+------------------------------
+  Dimension 0 — n_legs       (discrete integer)
+  Dimension 1 — symmetry_bin (0 = asymmetric, 1 = semi, 2 = symmetric)
+
+The bin edges for symmetry are taken from ExperimentConfig.symmetry_bins
+and default to [0.5, 0.8].
+
+Both archives share the same public interface:
+  update(results)           → updates the archive
+  best()                    → MorphologyResult with highest fitness
+  get_parents(n)            → list[RobotMorphology] to mutate next gen
+  save(path)                → serialise to JSON
+  load(path)  (classmethod) → deserialise from JSON
+  summary()                 → print a human-readable state summary
+
+Debug
+-----
+Run this file to test both archive types without needing CLIP.
+"""
+
+from __future__ import annotations
+
+import json
+import random
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+from typing import Optional
+import sys
+
+sys.path.insert(0, str(Path(__file__).parent))
+from morphology import RobotMorphology
+from data_handler import MorphologyResult, result_to_dict, dict_to_result
+
+
+# ---------------------------------------------------------------------------
+# Per-generation statistics (stored in archive history)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class GenerationStats:
+    """Aggregate fitness statistics for one generation."""
+    generation:         int
+    n_evaluated:        int
+    best_fitness:       float
+    mean_fitness:       float
+    std_fitness:        float
+    best_individual_id: int
+
+    def __str__(self) -> str:
+        return (
+            f"gen={self.generation:>4}  "
+            f"evaluated={self.n_evaluated:>4}  "
+            f"best={self.best_fitness:+.5f}  "
+            f"mean={self.mean_fitness:+.5f}  "
+            f"std={self.std_fitness:.5f}  "
+            f"best_id={self.best_individual_id}"
+        )
+
+
+def _make_stats(generation: int, results: list[MorphologyResult]) -> GenerationStats:
+    fitnesses = [r.fitness for r in results]
+    best      = max(results, key=lambda r: r.fitness)
+    import statistics
+    return GenerationStats(
+        generation         = generation,
+        n_evaluated        = len(results),
+        best_fitness       = best.fitness,
+        mean_fitness       = statistics.mean(fitnesses),
+        std_fitness        = statistics.stdev(fitnesses) if len(fitnesses) > 1 else 0.0,
+        best_individual_id = best.individual_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# MuLambdaArchive
+# ---------------------------------------------------------------------------
+
+class MuLambdaArchive:
+    """
+    (μ+λ) population archive.
+
+    Stores the μ best individuals.  History records per-generation stats
+    for the full μ+λ pool evaluated in that generation (not just survivors).
+
+    Parameters
+    ----------
+    mu : number of parents to keep after each selection step.
+    """
+
+    def __init__(self, mu: int):
+        self.mu:         int                      = mu
+        self.population: list[MorphologyResult]   = []   # current μ parents
+        self.history:    list[GenerationStats]     = []   # one entry per generation
+
+    # ---- Core operations ---------------------------------------------------
+
+    def update(self, results: list[MorphologyResult]) -> None:
+        """
+        Receive the μ+λ evaluated results for one generation.
+        Keeps the best μ by fitness → becomes the new population.
+        Records generation statistics over the full μ+λ pool.
+        """
+        if not results:
+            return
+
+        generation = results[0].generation
+        self.history.append(_make_stats(generation, results))
+
+        sorted_results  = sorted(results, key=lambda r: r.fitness, reverse=True)
+        self.population = sorted_results[:self.mu]
+
+    def best(self) -> Optional[MorphologyResult]:
+        """Individual with the highest fitness in the current population."""
+        if not self.population:
+            return None
+        return max(self.population, key=lambda r: r.fitness)
+
+    def get_parents(self, n: int) -> list[RobotMorphology]:
+        """
+        Return n morphologies from the current population to be mutated.
+        Samples with replacement if n > len(population).
+        """
+        if not self.population:
+            raise RuntimeError("Archive is empty — populate it first.")
+        morphs = [r.morphology for r in self.population]
+        if n <= len(morphs):
+            return random.sample(morphs, n)
+        return random.choices(morphs, k=n)
+
+    # ---- Summary -----------------------------------------------------------
+
+    def summary(self) -> None:
+        print(f"\n── MuLambdaArchive  μ={self.mu} ──")
+        print(f"  Population size : {len(self.population)}")
+        b = self.best()
+        if b:
+            print(f"  Best individual : id={b.individual_id}  fitness={b.fitness:+.5f}  "
+                  f"legs={b.descriptors.get('n_legs', '?')}")
+        if self.history:
+            last = self.history[-1]
+            print(f"  Last generation : {last}")
+        print(f"  History length  : {len(self.history)} generation(s)")
+
+    def fitness_history(self) -> tuple[list[float], list[float]]:
+        """Return (best_per_gen, mean_per_gen) lists for plotting."""
+        return (
+            [s.best_fitness  for s in self.history],
+            [s.mean_fitness  for s in self.history],
+        )
+
+    # ---- Serialisation -----------------------------------------------------
+
+    def to_dict(self) -> dict:
+        return {
+            "type":       "mu_lambda",
+            "mu":         self.mu,
+            "population": [result_to_dict(r) for r in self.population],
+            "history":    [asdict(s) for s in self.history],
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> MuLambdaArchive:
+        archive            = cls(mu=d["mu"])
+        archive.population = [dict_to_result(r) for r in d["population"]]
+        archive.history    = [GenerationStats(**s) for s in d["history"]]
+        return archive
+
+    def save(self, path: str) -> None:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(self.to_dict(), f, indent=2)
+
+    @classmethod
+    def load(cls, path: str) -> MuLambdaArchive:
+        with open(path) as f:
+            return cls.from_dict(json.load(f))
+
+
+# ---------------------------------------------------------------------------
+# MapEliteArchive
+# ---------------------------------------------------------------------------
+
+class MapEliteArchive:
+    """
+    MAP-Elites grid archive.
+
+    Feature space (two dimensions):
+      Axis 0 — n_legs       : discrete integer (from descriptors)
+      Axis 1 — symmetry_bin : integer bucket for symmetry_score
+
+    symmetry_bins defines the bin edges for axis 1.
+    Default [0.5, 0.8] produces 3 buckets:
+      0 = [0.0, 0.5)  asymmetric
+      1 = [0.5, 0.8)  semi-symmetric
+      2 = [0.8, 1.0]  symmetric
+
+    Parameters
+    ----------
+    symmetry_bins : list of float bin edges.
+    """
+
+    SYMMETRY_BIN_LABELS = ["asymmetric", "semi-sym", "symmetric"]
+
+    def __init__(self, symmetry_bins: list[float] = None):
+        self.symmetry_bins: list[float]               = symmetry_bins or [0.5, 0.8]
+        self.grid:          dict[tuple, MorphologyResult] = {}
+        self.history:       list[GenerationStats]          = []
+
+    # ---- Feature key -------------------------------------------------------
+
+    def _symmetry_bin(self, score: float) -> int:
+        for i, edge in enumerate(self.symmetry_bins):
+            if score < edge:
+                return i
+        return len(self.symmetry_bins)
+
+    def feature_key(self, result: MorphologyResult) -> tuple:
+        """Map a result to its (n_legs, symmetry_bin) cell key."""
+        n_legs  = int(result.descriptors["n_legs"])
+        sym_bin = self._symmetry_bin(result.descriptors["symmetry_score"])
+        return (n_legs, sym_bin)
+
+    def feature_label(self, key: tuple) -> str:
+        """Human-readable cell label, e.g. '4legs/symmetric'."""
+        n_legs, sym_bin = key
+        label = (self.SYMMETRY_BIN_LABELS[sym_bin]
+                 if sym_bin < len(self.SYMMETRY_BIN_LABELS)
+                 else str(sym_bin))
+        return f"{n_legs}legs/{label}"
+
+    # ---- Core operations ---------------------------------------------------
+
+    def update(self, results: list[MorphologyResult]) -> None:
+        """
+        Insert each result into the grid.
+        A cell is updated only when the new individual's fitness is
+        strictly higher than the current occupant.
+        Records generation statistics over the given results.
+        """
+        if not results:
+            return
+
+        generation = results[0].generation
+        self.history.append(_make_stats(generation, results))
+
+        for r in results:
+            key = self.feature_key(r)
+            if key not in self.grid or r.fitness > self.grid[key].fitness:
+                self.grid[key] = r
+
+    def best(self) -> Optional[MorphologyResult]:
+        """Individual with the highest fitness across all grid cells."""
+        if not self.grid:
+            return None
+        return max(self.grid.values(), key=lambda r: r.fitness)
+
+    def get_parents(self, n: int) -> list[RobotMorphology]:
+        """
+        Sample n morphologies from filled grid cells (uniform over cells,
+        not over individuals).  Samples with replacement if n > cells.
+        """
+        if not self.grid:
+            raise RuntimeError("Archive grid is empty — populate it first.")
+        filled = list(self.grid.values())
+        morphs = [r.morphology for r in filled]
+        if n <= len(morphs):
+            return random.sample(morphs, n)
+        return random.choices(morphs, k=n)
+
+    # ---- Summary -----------------------------------------------------------
+
+    def summary(self) -> None:
+        print(f"\n── MapEliteArchive  bins={self.symmetry_bins} ──")
+        print(f"  Filled cells : {len(self.grid)}")
+        b = self.best()
+        if b:
+            print(f"  Best overall : id={b.individual_id}  fitness={b.fitness:+.5f}  "
+                  f"cell={self.feature_label(self.feature_key(b))}")
+        print(f"  Grid contents:")
+        for key in sorted(self.grid):
+            r = self.grid[key]
+            print(f"    {self.feature_label(key):<22}  fitness={r.fitness:+.5f}  "
+                  f"id={r.individual_id}")
+        if self.history:
+            print(f"  Last gen : {self.history[-1]}")
+
+    def fitness_history(self) -> tuple[list[float], list[float]]:
+        return (
+            [s.best_fitness for s in self.history],
+            [s.mean_fitness for s in self.history],
+        )
+
+    # ---- Serialisation -----------------------------------------------------
+
+    def to_dict(self) -> dict:
+        return {
+            "type":          "map_elite",
+            "symmetry_bins": self.symmetry_bins,
+            "grid":          {str(k): result_to_dict(v) for k, v in self.grid.items()},
+            "history":       [asdict(s) for s in self.history],
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> MapEliteArchive:
+        archive = cls(symmetry_bins=d["symmetry_bins"])
+        for k_str, v in d["grid"].items():
+            key = tuple(int(x) for x in k_str.strip("()").split(", "))
+            archive.grid[key] = dict_to_result(v)
+        archive.history = [GenerationStats(**s) for s in d["history"]]
+        return archive
+
+    def save(self, path: str) -> None:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(self.to_dict(), f, indent=2)
+
+    @classmethod
+    def load(cls, path: str) -> MapEliteArchive:
+        with open(path) as f:
+            return cls.from_dict(json.load(f))
+
+
+# ---------------------------------------------------------------------------
+# Debug
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import sys, tempfile, os
+    sys.path.insert(0, str(Path(__file__).parent))
+    from morphology import QUADRIPOD, TRIPOD, HEXAPOD, NewMorph, MutateMorphology
+    import numpy as np
+
+    print("=" * 60)
+    print("  archive.py — debug mode")
+    print("=" * 60)
+
+    # Build fake MorphologyResults (no CLIP needed)
+    def fake_result(morph, generation, individual_id, fitness):
+        return MorphologyResult(
+            generation    = generation,
+            individual_id = individual_id,
+            morphology    = morph,
+            fitness       = fitness,
+            raw_scores    = {},
+            descriptors   = morph.encoding(),
+            grader_method = "fake",
+            prompt_set    = "test",
+        )
+
+    rng  = np.random.default_rng(0)
+    pool = [fake_result(NewMorph(), 0, i, rng.uniform(-1, 1)) for i in range(30)]
+
+    # ---- MuLambdaArchive ---------------------------------------------------
+    print("\n[1] MuLambdaArchive\n")
+    mu_archive = MuLambdaArchive(mu=5)
+
+    # Gen 0: initialise with 10 individuals
+    mu_archive.update(pool[:10])
+    mu_archive.summary()
+
+    # Gen 1: produce 5 offspring from parents, evaluate 5+5=10 total
+    parents = mu_archive.get_parents(5)
+    print(f"\n  Parents drawn: {len(parents)} morphologies")
+    offspring = [fake_result(MutateMorphology(p, rng=rng), 1, 10 + i, rng.uniform(-1, 1))
+                 for i, p in enumerate(parents)]
+    gen1_pool = [fake_result(r.morphology, 1, r.individual_id, r.fitness)
+                 for r in mu_archive.population] + offspring
+    mu_archive.update(gen1_pool)
+    mu_archive.summary()
+
+    # ---- MapEliteArchive ---------------------------------------------------
+    print("\n[2] MapEliteArchive\n")
+    me_archive = MapEliteArchive()
+    me_archive.update(pool)
+    me_archive.summary()
+
+    # Add a high-fitness result to a specific cell
+    super_morph  = HEXAPOD
+    super_result = fake_result(super_morph, 1, 999, 0.999)
+    me_archive.update([super_result])
+    print(f"\n  After inserting super_result (fitness=0.999):")
+    me_archive.summary()
+
+    # ---- Serialisation round-trip ------------------------------------------
+    print("\n[3] Serialisation round-trip\n")
+    with tempfile.TemporaryDirectory() as tmp:
+        for archive, name in ((mu_archive, "mu_lambda.json"), (me_archive, "map_elite.json")):
+            path = os.path.join(tmp, name)
+            archive.save(path)
+
+            if isinstance(archive, MuLambdaArchive):
+                loaded = MuLambdaArchive.load(path)
+                assert loaded.mu == archive.mu
+                assert len(loaded.population) == len(archive.population)
+            else:
+                loaded = MapEliteArchive.load(path)
+                assert len(loaded.grid) == len(archive.grid)
+                assert loaded.symmetry_bins == archive.symmetry_bins
+
+            print(f"  {name}: OK  ({os.path.getsize(path)} bytes)")
+
+    # ---- Fitness history ---------------------------------------------------
+    print("\n[4] Fitness history\n")
+    bests, means = mu_archive.fitness_history()
+    for i, (b, m) in enumerate(zip(bests, means)):
+        print(f"  gen {i}: best={b:+.4f}  mean={m:+.4f}")
+
+    print("\nAll archive checks passed.")
