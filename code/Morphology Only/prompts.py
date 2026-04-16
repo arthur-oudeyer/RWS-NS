@@ -106,7 +106,6 @@ SPIDER_BODY = PromptSet(
     ],
 )
 
-
 COMPACT_STABLE = PromptSet(
     name        = "compact_stable",
     description = "Reward compact, low-profile morphologies that look stable "
@@ -141,47 +140,13 @@ MANY_LEGS = PromptSet(
     ],
 )
 
-
-RADIAL_SYMMETRY = PromptSet(
-    name        = "radial_symmetry",
-    description = "Reward morphologies where limbs are evenly distributed "
-                  "around the torso axis (rotational symmetry).",
-    positive = [
-        WeightedPrompt("a robot with perfectly symmetric legs arranged in a regular polygon pattern",   weight=2.0),
-        WeightedPrompt("a top-view of a robot showing evenly spaced limbs in a star shape",            weight=1.5),
-        WeightedPrompt("a 3D simulation robot with rotational symmetry around its vertical axis",      weight=1.5),
-        WeightedPrompt("a robot where all legs are the same length and equally spaced",                weight=1.0),
-    ],
-    negative = [
-        WeightedPrompt("a robot with unevenly distributed or asymmetric legs",  weight=1.5),
-        WeightedPrompt("a robot where most legs are on one side",               weight=2.0),
-    ],
-)
-
-
-BRANCHED_LIMBS = PromptSet(
-    name        = "branched_limbs",
-    description = "Reward tree-like limb structures where sub-limbs branch "
-                  "from the middle of existing limbs rather than from the torso.",
-    positive = [
-        WeightedPrompt("a robot with branching limbs where smaller rods grow from the middle of legs", weight=2.0),
-        WeightedPrompt("a tree-like robotic structure with hierarchical branching segments",           weight=1.5),
-        WeightedPrompt("a 3D simulation creature where limbs split into sub-limbs",                   weight=1.5),
-        WeightedPrompt("a fractal-like robot body with nested appendages",                            weight=1.0),
-    ],
-    negative = [
-        WeightedPrompt("a robot with simple straight legs attached only to the torso",  weight=1.0),
-    ],
-)
-
-
 # ---------------------------------------------------------------------------
 # Registry — all available prompt sets in one dict
 # ---------------------------------------------------------------------------
 
 ALL_PROMPT_SETS: dict[str, PromptSet] = {
     ps.name: ps
-    for ps in (SPIDER_BODY, COMPACT_STABLE, MANY_LEGS, RADIAL_SYMMETRY, BRANCHED_LIMBS)
+    for ps in (SPIDER_BODY, COMPACT_STABLE, MANY_LEGS)
 }
 
 

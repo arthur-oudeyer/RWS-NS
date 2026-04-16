@@ -19,7 +19,7 @@ import numpy as np
 from sim_config import ROBOT_CONTROL, N, CONTROLLER_INIT, MORPHOLOGIES
 
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Brain'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Robot'))
 from controller import getController
 from morphology import resolve_morphologies
 

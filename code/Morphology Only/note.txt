@@ -1,0 +1,11 @@
+# Prompt tester usage :
+Usage :
+python3 prompt_tester.py --pos <positive png folder> --neg <negative png folder> --sets <sets to test> --compact --top_n <nb of prompt discrimination shown, 0 for all>
+Ex : testing folder 'pos' as positive and 'neg' as negative for the prompt set 'spyder_body' with compact output mode
+python3 prompt_tester.py --pos pos --neg neg --sets spider_body --compact
+
+# Experiment
+Usage :
+python3 experiment.py --strategy <mu_lambda | map_elite> --mu <int> --lambda_ <int> --n_gen <int> --prompt_set <prompt set name>
+Ex : (5 + 10) strategy, 5 generation, with prompt CLIP evaluation "spyder body"
+python3 experiment.py --strategy mu_lambda --mu 5 --lambda_ 10 --n_gen 5 --prompt_set "spider_body"

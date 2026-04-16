@@ -17,7 +17,7 @@ import numpy as np
 from colorama import Fore, Style
 
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Brain'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Robot'))
 from simple_brain import controllers as nn_controllers
 from morphology import MorphologyManager, resolve_morphologies
 

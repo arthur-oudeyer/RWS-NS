@@ -93,6 +93,9 @@ class BaseEvolution(ABC):
             add_remove_prob  = self.cfg.add_remove_prob,
             allow_branching  = self.cfg.allow_branching,
             branching_prob   = self.cfg.branching_prob,
+            torso_radius_std = self.cfg.torso_radius_std,
+            torso_height_std = self.cfg.torso_height_std,
+            torso_euler_std  = self.cfg.torso_euler_std,
             rng              = self.rng,
         )
 

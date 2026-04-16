@@ -6,7 +6,7 @@ This is the only file you need to edit for most experiments.
 """
 from pathlib import Path
 import sys as _sys
-_sys.path.insert(0, str(Path(__file__).parent.parent / 'Brain'))
+_sys.path.insert(0, str(Path(__file__).parent.parent / 'Robot'))
 from morphology import QUADRIPOD, TRIPOD, HEXAPOD, RobotMorphology
 
 # ---------------------------------------------------------------------------

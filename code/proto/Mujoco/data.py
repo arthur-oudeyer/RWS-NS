@@ -27,7 +27,7 @@ import numpy as np
 
 from control import RobotSensorData
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Brain'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Robot'))
 from saver import save_controller, load_controller, clear_save
 from morphology import RobotMorphology
 

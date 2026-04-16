@@ -27,7 +27,7 @@ from typing import List
 
 import mujoco
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Brain'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Robot'))
 from morphology import MorphologyManager, RobotMorphology
 
 from sim_config import PHYSICS_XML, ROBOT_SPACING

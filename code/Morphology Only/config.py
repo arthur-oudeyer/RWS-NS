@@ -44,8 +44,8 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 
 DEFAULT_CAMERA_VIEWS = [
-    {"azimuth": 0,   "elevation": 5, "distance": 1.8, "lookat": [0.0, 0.0, 0.25]},
-    {"azimuth": 45, "elevation": -50, "distance": 1.8, "lookat": [0.0, 0.0, 0.25]},
+    {"azimuth": 0,   "elevation": 5, "distance": 2., "lookat": [0.0, 0.0, 0.25]},
+    {"azimuth": 45, "elevation": -50, "distance": 2., "lookat": [0.0, 0.0, 0.25]},
 ]
 
 
@@ -88,12 +88,16 @@ class ExperimentConfig:
     init_n_legs_max: int = 6
 
     # ---- Mutation -----------------------------------------------------------
-    length_std:      float = 0.05        # Gaussian std for segment length (m) (base length ~0.25)
-    angle_std:       float = 12.0        # Gaussian std for placement angle (deg) (angle pos torso / relative angle for swing axis for branched)
-    rest_angle_std:  float = 0.15        # Gaussian std for rest angle (rad)
-    add_remove_prob: float = 0.2        # probability of adding or removing a leg
-    allow_branching: bool  = True        # whether mutation can create branched legs
-    branching_prob:  float = 0.5         # conditional prob of adding a branched leg
+    length_std:       float = 0.05        # Gaussian std for segment length (m) (base length ~0.25)
+    angle_std:        float = 12.0        # Gaussian std for placement angle (deg) (angle pos torso / relative angle for swing axis for branched)
+    rest_angle_std:   float = 0.15        # Gaussian std for rest angle (rad)
+    add_remove_prob:  float = 0.5         # probability of adding or removing a leg
+    allow_branching:  bool  = True        # whether mutation can create branched legs
+    branching_prob:   float = 0.5        # conditional prob of adding a branched leg
+    # Torso mutation (0.0 = keep fixed, i.e. torso shape/orientation unchanged)
+    torso_radius_std: float = 0.05         # Gaussian std for torso radius (m)
+    torso_height_std: float = 0.05         # Gaussian std for torso half-height (m)
+    torso_euler_std:  float = 5.0         # Gaussian std per euler axis (degrees)
 
     # ---- Rendering ----------------------------------------------------------
     render_width:    int  = 256
@@ -101,7 +105,12 @@ class ExperimentConfig:
     camera_views:    list = field(default_factory=lambda: list(DEFAULT_CAMERA_VIEWS))
 
     # ---- Grader -------------------------------------------------------------
-    clip_model:      str = "ViT-B-32"
+    """
+    CLIP ViT-B-32   350 MB   RAM ~1 GB   ~50ms/image
+    CLIP ViT-B-16   350 MB   RAM ~1 GB   ~80ms/image
+    CLIP ViT-L-14   890 MB   RAM ~2 GB   ~150ms/image
+    """
+    clip_model:      str = "ViT-L-14"
     clip_pretrained: str = "openai"
     clip_cache_dir:  str = "/Volumes/T7_AO/clip-models"
     scoring_method:  str = "cosine"      # "cosine" | "softmax"
@@ -115,7 +124,7 @@ class ExperimentConfig:
     #                         (0 = disabled).  Saved to renders/best/gen{N:04d}.png
     # save_final_best       : always render and save the overall best at end of run.
     #                         Saved to renders/best_final.png
-    save_best_every_n_gen: int  = 0     # 0 to disable
+    save_best_every_n_gen: int  = 5     # 0 to disable
     save_final_best:       bool = True
 
     # ---- MapElite -----------------------------------------------------------
@@ -172,6 +181,8 @@ class ExperimentConfig:
         print(f"  mutation     : length_std={self.length_std}  angle_std={self.angle_std}  "
               f"rest_angle_std={self.rest_angle_std}")
         print(f"  add_remove   : {self.add_remove_prob:.0%}  branching={self.allow_branching} ({self.branching_prob:.0%})")
+        print(f"  torso mut    : radius_std={self.torso_radius_std}  height_std={self.torso_height_std}  "
+              f"euler_std={self.torso_euler_std}°")
         print(f"  seed         : {self.seed}")
         print(f"  grader       : {self.clip_model}  method={self.scoring_method}  "
               f"prompts={self.prompt_set_name}")

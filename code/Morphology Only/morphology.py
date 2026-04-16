@@ -121,6 +121,7 @@ class RobotMorphology:
     torso_radius:  float = 0.12
     torso_height:  float = 0.04
     torso_rgba:    tuple = (0.9, 0.9, 0.9, 1.0)
+    torso_euler:   tuple = (0.0, 0.0, 0.0)   # roll, pitch, yaw (degrees) of the torso body
     spawn_height:  float = 0.5
     foot_radius:   float = 0.038
     foot_rgba:     tuple = (0.9, 0.7, 0.2, 1.0)
@@ -185,6 +186,8 @@ class RobotMorphology:
             "mean_segment_length":  round(float(np.mean(all_lengths)), 4) if all_lengths else 0.0,
             "max_segment_length":   round(float(max(all_lengths)), 4) if all_lengths else 0.0,
             "torso_radius":         self.torso_radius,
+            "torso_height":         self.torso_height,
+            "torso_euler":          list(self.torso_euler),
         }
 
 # ---------------------------------------------------------------------------
@@ -265,6 +268,9 @@ def MutateMorphology(
     add_remove_prob:  float = 0.15,
     allow_branching:  bool  = False,
     branching_prob:   float = 0.3,
+    torso_radius_std: float = 0.0,   # Gaussian std for torso radius (m); 0 = fixed
+    torso_height_std: float = 0.0,   # Gaussian std for torso half-height (m); 0 = fixed
+    torso_euler_std:  float = 0.0,   # Gaussian std applied to each euler axis (deg); 0 = fixed
     rng:              Optional[np.random.Generator] = None,
 ) -> RobotMorphology:
     """
@@ -272,13 +278,17 @@ def MutateMorphology(
 
     Parameters
     ----------
-    length_std      : std dev (metres) for Gaussian length perturbations.
-    angle_std       : std dev (degrees) for placement angle jitter.
-    add_remove_prob : probability [0, 1] of adding or removing one leg.
-    allow_branching : when adding a leg, whether it can attach to another
-                      leg's segment rather than the torso.
-    rng             : numpy Generator for reproducibility (uses global
-                      default if None).
+    length_std       : std dev (metres) for Gaussian length perturbations.
+    angle_std        : std dev (degrees) for placement angle jitter.
+    add_remove_prob  : probability [0, 1] of adding or removing one leg.
+    allow_branching  : when adding a leg, whether it can attach to another
+                       leg's segment rather than the torso.
+    torso_radius_std : std dev for torso radius perturbation.  Clamped to [0.05, 0.30].
+    torso_height_std : std dev for torso half-height perturbation.  Clamped to [0.01, 0.25].
+    torso_euler_std  : std dev (degrees) applied independently to each of the three
+                       torso Euler angles (roll, pitch, yaw).  Yaw wraps at ±180°;
+                       roll and pitch are clamped to ±90°.
+    rng              : numpy Generator for reproducibility (uses global default if None).
     """
     if rng is None:
         rng = np.random.default_rng()
@@ -345,6 +355,23 @@ def MutateMorphology(
                 j.ctrl_range[0], j.ctrl_range[1],
             ))
 
+    # --- Perturb torso shape and orientation ---
+    if torso_radius_std > 0:
+        new.torso_radius = float(np.clip(
+            new.torso_radius + rng.normal(0, torso_radius_std), 0.05, 0.30,
+        ))
+    if torso_height_std > 0:
+        new.torso_height = float(np.clip(
+            new.torso_height + rng.normal(0, torso_height_std), 0.01, 0.25,
+        ))
+    if torso_euler_std > 0:
+        rx, ry, rz = new.torso_euler
+        new.torso_euler = (
+            float(np.clip(rx + rng.normal(0, torso_euler_std), -90.0,  90.0)),
+            float(np.clip(ry + rng.normal(0, torso_euler_std), -90.0,  90.0)),
+            float((rz + rng.normal(0, torso_euler_std) + 180.0) % 360.0 - 180.0),
+        )
+
     return new
 
 
@@ -359,6 +386,7 @@ def morphology_to_dict(morph: RobotMorphology) -> dict:
         "torso_radius":  morph.torso_radius,
         "torso_height":  morph.torso_height,
         "torso_rgba":    list(morph.torso_rgba),
+        "torso_euler":   list(morph.torso_euler),
         "spawn_height":  morph.spawn_height,
         "foot_radius":   morph.foot_radius,
         "foot_rgba":     list(morph.foot_rgba),
@@ -417,6 +445,7 @@ def dict_to_morphology(d: dict) -> RobotMorphology:
         torso_radius = d["torso_radius"],
         torso_height = d["torso_height"],
         torso_rgba   = tuple(d["torso_rgba"]),
+        torso_euler  = tuple(d.get("torso_euler", [0.0, 0.0, 0.0])),  # default for old saves
         spawn_height = d["spawn_height"],
         foot_radius  = d["foot_radius"],
         foot_rgba    = tuple(d["foot_rgba"]),
@@ -580,6 +609,9 @@ class MorphologyManager:
             name = f"{prefix}torso",
             pos  = f"{x} {y} {morph.spawn_height}",
         )
+        te_rx, te_ry, te_rz = morph.torso_euler
+        if any(abs(v) > 1e-6 for v in (te_rx, te_ry, te_rz)):
+            torso.set("euler", f"{te_rx:.4f} {te_ry:.4f} {te_rz:.4f}")
         ET.SubElement(torso, "freejoint", name=f"{prefix}root")
         ET.SubElement(torso, "geom",
             name  = f"{prefix}torso_geom",
