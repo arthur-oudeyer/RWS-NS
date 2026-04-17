@@ -86,17 +86,22 @@ class BaseEvolution(ABC):
     def _mutate_one(self, parent: RobotMorphology) -> RobotMorphology:
         """Apply one mutation step to a parent morphology."""
         return MutateMorphology(
-            base             = parent,
-            length_std       = self.cfg.length_std,
-            angle_std        = self.cfg.angle_std,
-            rest_angle_std   = self.cfg.rest_angle_std,
-            add_remove_prob  = self.cfg.add_remove_prob,
-            allow_branching  = self.cfg.allow_branching,
-            branching_prob   = self.cfg.branching_prob,
-            torso_radius_std = self.cfg.torso_radius_std,
-            torso_height_std = self.cfg.torso_height_std,
-            torso_euler_std  = self.cfg.torso_euler_std,
-            rng              = self.rng,
+            base                      = parent,
+            length_std                = self.cfg.length_std,
+            angle_std                 = self.cfg.angle_std,
+            rest_angle_std            = self.cfg.rest_angle_std,
+            add_remove_prob           = self.cfg.add_remove_prob,
+            allow_branching           = self.cfg.allow_branching,
+            branching_prob            = self.cfg.branching_prob,
+            torso_radius_std          = self.cfg.torso_radius_std,
+            torso_height_std          = self.cfg.torso_height_std,
+            torso_euler_std           = self.cfg.torso_euler_std,
+            add_remove_body_part_prob = self.cfg.add_remove_body_part_prob,
+            body_part_radius_std      = self.cfg.body_part_radius_std,
+            body_part_height_std      = self.cfg.body_part_height_std,
+            body_part_euler_std       = self.cfg.body_part_euler_std,
+            body_part_leg_prob        = self.cfg.body_part_leg_prob,
+            rng                       = self.rng,
         )
 
     def _evaluate_batch(
@@ -261,6 +266,7 @@ class MuLambdaEvolution(BaseEvolution):
                 grader_method = r.grader_method,
                 prompt_set    = r.prompt_set,
                 render_path   = r.render_path,
+                grader_extra  = r.grader_extra,
             )
             for r in archive.population
         ]

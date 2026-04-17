@@ -35,7 +35,7 @@ Run this file to test the full evaluation pipeline end-to-end
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from typing import Optional
 
@@ -75,6 +75,11 @@ class MorphologyResult:
     grader_method: str
     prompt_set:    str
     render_path:   Optional[str] = None
+    grader_extra:  dict = dataclass_field(default_factory=dict)
+    # grader_extra stores backend-specific metadata for analysis:
+    # - CLIP  : {} (empty)
+    # - Gemini: {"observation", "interpretation",
+    #             "coherence_reason", "originality_reason", "interest_reason"}
 
     def __str__(self) -> str:
         enc = self.descriptors
@@ -103,6 +108,7 @@ def result_to_dict(r: MorphologyResult) -> dict:
         "grader_method": r.grader_method,
         "prompt_set":    r.prompt_set,
         "render_path":   r.render_path,
+        "grader_extra":  r.grader_extra,
     }
 
 
@@ -117,6 +123,7 @@ def dict_to_result(d: dict) -> MorphologyResult:
         grader_method = d["grader_method"],
         prompt_set    = d["prompt_set"],
         render_path   = d.get("render_path"),
+        grader_extra  = d.get("grader_extra", {}),
     )
 
 
@@ -173,6 +180,7 @@ def evaluate(
         grader_method = grader_output.method,
         prompt_set    = grader_output.prompt_set,
         render_path   = render_save_path,
+        grader_extra  = grader_output.extra,
     )
 
 

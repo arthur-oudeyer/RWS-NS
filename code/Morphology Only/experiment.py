@@ -34,7 +34,7 @@ renderer and grader (no CLIP or MuJoCo required).
 from __future__ import annotations
 
 import json
-import sys
+import sys, os
 import time
 from pathlib import Path
 from typing import Optional, Union
@@ -50,8 +50,8 @@ from grader       import CLIPGrader, GeminiGrader, MorphologyGrader
 from CLIP_prompts import get_clip_prompt_set
 from gemini_prompts import get_gemini_prompt_set
 from data_handler import MorphologyResult
+from report       import generate_report
 
-import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from api_keys import APIKEY_GEMINI
 
@@ -71,9 +71,10 @@ def _make_renderer(cfg: ExperimentConfig) -> MorphologyRenderer:
         for v in cfg.camera_views
     ]
     render_cfg = RenderConfig(
-        width        = cfg.render_width,
-        height       = cfg.render_height,
-        camera_views = views,
+        width           = cfg.render_width,
+        height          = cfg.render_height,
+        camera_views    = views,
+        floor_clearance = cfg.floor_clearance,
     )
     return MorphologyRenderer(render_cfg)
 
@@ -310,6 +311,8 @@ def run(
     print(f"\n[experiment] Done.  Final archive → {final_path}")
     archive.summary()
 
+    generate_report(run_dir, print_report=False)
+
     renderer.close()
     return archive
 
@@ -410,6 +413,8 @@ def resume(
         _save_best_render(archive, renderer, run_dir, "best_final")
     print(f"\n[experiment] Done.  Final archive → {final_path}")
     archive.summary()
+
+    generate_report(run_dir, print_report=False)
 
     renderer.close()
     return archive

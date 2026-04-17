@@ -48,7 +48,6 @@ DEFAULT_CAMERA_VIEWS = [
     {"azimuth": 45, "elevation": -50, "distance": 2., "lookat": [0.0, 0.0, 0.25]},
 ]
 
-
 # ---------------------------------------------------------------------------
 # ExperimentConfig
 # ---------------------------------------------------------------------------
@@ -80,7 +79,7 @@ class ExperimentConfig:
 
     # ---- Population ---------------------------------------------------------
     mu:              int = 5            # number of parents kept each generation
-    lambda_:         int = 5           # number of offspring produced each generation
+    lambda_:         int = 5            # number of offspring produced each generation
     n_generations:   int = 3
 
     # ---- Initial population -------------------------------------------------
@@ -98,11 +97,18 @@ class ExperimentConfig:
     torso_radius_std: float = 0.05         # Gaussian std for torso radius (m)
     torso_height_std: float = 0.05         # Gaussian std for torso half-height (m)
     torso_euler_std:  float = 5.0         # Gaussian std per euler axis (degrees)
+    # Body part mutation
+    add_remove_body_part_prob: float = 0.1  # prob of adding/removing a body part (0 = disabled)
+    body_part_radius_std:      float = 0.02
+    body_part_height_std:      float = 0.01
+    body_part_euler_std:       float = 5.0
+    body_part_leg_prob:        float = 0.5  # when adding a leg, prob of attaching to a body part
 
     # ---- Rendering ----------------------------------------------------------
-    render_width:    int  = 192
-    render_height:   int  = 192
-    camera_views:    list = field(default_factory=lambda: list(DEFAULT_CAMERA_VIEWS))
+    render_width:    int   = 192
+    render_height:   int   = 192
+    camera_views:    list  = field(default_factory=lambda: list(DEFAULT_CAMERA_VIEWS))
+    floor_clearance: float = 0   # metres of clearance above z=0 (auto spawn-height)
 
     # ---- Grader -------------------------------------------------------------
     grader_type = "gemini" # clip | gemini
@@ -135,7 +141,7 @@ class ExperimentConfig:
     #                         (0 = disabled).  Saved to renders/best/gen{N:04d}.png
     # save_final_best       : always render and save the overall best at end of run.
     #                         Saved to renders/best_final.png
-    save_best_every_n_gen: int  = 5     # 0 to disable
+    save_best_every_n_gen: int  = 1     # 0 to disable
     save_final_best:       bool = True
 
     # ---- MapElite -----------------------------------------------------------

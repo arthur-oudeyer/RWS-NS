@@ -86,7 +86,7 @@ from __future__ import annotations
 
 import sys
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -128,20 +128,30 @@ class GraderOutput:
     ----------
     fitness      : weighted combination of positive minus negative scores.
                    This is the number the evolution loop uses for selection.
-    raw_scores   : dict mapping each prompt text to its score.
+    raw_scores   : dict mapping each prompt / dimension to its numeric score.
                    Stored for full traceability and analysis.
-    method       : "cosine" or "softmax" — how raw_scores were computed.
-    prompt_set   : name of the PromptSet that was applied.
+    method       : "cosine", "softmax", or "gemini".
+    prompt_set   : name of the PromptSet / GeminiPromptConfig that was applied.
+    extra        : backend-specific metadata, empty for CLIP.
+                   For GeminiGrader this contains:
+                     "observation"        — factual description of the image
+                     "interpretation"     — structural interpretation
+                     "coherence_reason"   — why Gemini gave that coherence score
+                     "originality_reason" — why Gemini gave that originality score
+                     "interest_reason"    — why Gemini gave that interest score
     """
     fitness:    float
     raw_scores: dict[str, float]
     method:     str
     prompt_set: str
+    extra:      dict = field(default_factory=dict)
 
     def __str__(self) -> str:
         lines = [f"fitness={self.fitness:.4f}  method={self.method}  set={self.prompt_set}"]
         for text, score in sorted(self.raw_scores.items(), key=lambda x: -x[1]):
             lines.append(f"  {score:+.4f}  {text}")
+        if self.extra.get("observation"):
+            lines.append(f"  observation: {self.extra['observation'][:100]}")
         return "\n".join(lines)
 
 
@@ -510,11 +520,26 @@ class GeminiGrader(MorphologyGrader):
             "interest":    round(interest,    4),
         }
 
+        def _reason(key: str) -> str:
+            val = parsed.get(key, {})
+            if isinstance(val, dict):
+                return val.get("reason", "")
+            return ""
+
+        extra = {
+            "observation":        parsed.get("observation", ""),
+            "interpretation":     parsed.get("interpretation", ""),
+            "coherence_reason":   _reason("coherence"),
+            "originality_reason": _reason("originality"),
+            "interest_reason":    _reason("interest"),
+        }
+
         result = GraderOutput(
             fitness    = fitness,
             raw_scores = raw_scores,
             method     = "gemini",
             prompt_set = self._prompt_config.name,
+            extra      = extra,
         )
 
         if dbg:
@@ -524,8 +549,10 @@ class GeminiGrader(MorphologyGrader):
             print(f"    originality = {originality:.1f}  (w={w.originality})")
             print(f"    interest    = {interest:.1f}  (w={w.interest})")
             print(f"  → fitness = {fitness:.5f}")
-            if "observation" in parsed:
-                print(f"  observation: {parsed['observation'][:120]}")
+            if extra.get("observation"):
+                print(f"  observation: {extra['observation'][:120]}")
+            if extra.get("interpretation"):
+                print(f"  interpretation: {extra['interpretation'][:120]}")
 
         return result
 

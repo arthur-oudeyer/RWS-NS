@@ -1,0 +1,151 @@
+════════════════════════════════════════════════════════════════════════
+  RUN REPORT — run_20260417_153300
+════════════════════════════════════════════════════════════════════════
+  Archive  : archive_final.json
+  Strategy : mu_lambda  (μ=5, λ=5, generations=3)
+  Grader   : gemini   Prompt: crab_morph
+  Entries  : 5 individuals (sorted ascending by fitness)
+════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────
+Rank   1 / 5  │  ID     0  │  gen   3  │  fitness = +0.46667  (gemini)
+────────────────────────────────────────────────────────────────────────
+  Scores   : coherence=4.0  originality=5.0  interest=5.0
+  Morpho   : legs=6 (root=6 branch=0 bparts=0)  sym=0.629  seg_len=0.370 m
+  Torso    : radius=0.120 m  half-height=0.040 m
+
+  Observation   : The robot consists of a white vertical cylindrical torso supported by at least six
+                    multi-colored, two-segment limbs (brown, purple, pink, green, yellow, and pale blue). The
+                    limbs are attached to the bottom rim of the torso. Each limb ends in a yellow spherical
+                    contact point. In the left view, a brown limb is extended far forward, while others remain
+                    closer to the body. The right view shows a hexagonal-like distribution of limb attachment
+                    points around the base of the cylinder. The robot is currently in an upright, standing
+                    posture.
+  Interpretation: The structure is a multi-legged walker with a high center of mass. While the number of
+                    limbs (approx. 6) is closer to a crab than a standard quadruped, the vertical orientation
+                    of the body and the downward-pointing leg attachments are structurally distinct from a
+                    crab's wide, horizontal body plan. The asymmetric extension of the brown leg suggests the
+                    robot may be in the middle of a step or has an unbalanced default pose. Stability is
+                    plausible due to the number of contact points, but the high torso makes it susceptible to
+                    tipping.
+  Coherence     : It captures the multi-legged aspect of a crab, but the vertical cylindrical body and limb
+                    orientation fail to replicate the iconic flat, lateral morphology of the target.
+  Originality   : The design uses a vertical cylinder instead of the usual sphere for the torso and employs
+                    a high limb count with distinct color-coding, representing a minor variation on standard
+                    MuJoCo walkers.
+  Interest      : Six legs provide a good foundation for stable gait patterns like a tripod gait, but the
+                    high center of gravity and thin limbs suggest potential inefficiency or instability during
+                    rapid movement.
+
+────────────────────────────────────────────────────────────────────────
+Rank   2 / 5  │  ID    19  │  gen   3  │  fitness = +0.46667  (gemini)
+────────────────────────────────────────────────────────────────────────
+  Scores   : coherence=5.0  originality=3.0  interest=5.0
+  Morpho   : legs=7 (root=7 branch=0 bparts=0)  sym=0.000  seg_len=0.325 m
+  Torso    : radius=0.253 m  half-height=0.065 m
+
+  Observation   : The robot features a white, flat cylindrical torso suspended above a checkerboard floor.
+                    It has multiple single-segment limbs (approximately 6 to 8) of various colors (purple,
+                    yellow, blue, orange) attached radially to the perimeter of the torso. Each limb
+                    terminates in a small yellow spherical foot. The torso is currently held upright but shows
+                    a slight tilt. The limbs are thin relative to the torso size and appear to have only one
+                    degree of freedom at the torso attachment point. There is a general radial symmetry,
+                    though the specific angles and colors of the limbs vary slightly.
+  Interpretation: The morphology attempts to mimic a crab through its flattened body and multiple legs
+                    sprouting from the sides. However, the lack of articulated knee joints makes it more akin
+                    to a simplified multi-legged walker than a true crustacean. The high number of contact
+                    points provides a stable base, which is promising for basic locomotion, but the
+                    single-segment design suggests a limited range of motion likely resulting in a 'shuffling'
+                    or 'pivot-based' gait. The torso's height and weight relative to the thin limbs might pose
+                    durability or torque issues during movement.
+  Coherence     : It achieves a partial match with the crab target due to the flat circular body and
+                    numerous lateral limbs, though it lacks the characteristic jointed leg structure and
+                    claws.
+  Originality   : The design follows a very standard body plan for multi-legged physics simulations, using
+                    basic geometric primitives without significant structural innovation.
+  Interest      : The structure is plausible for stable locomotion because the wide distribution of legs
+                    creates a large support polygon. However, the kinematic simplicity of single-segment legs
+                    limits its evolutionary potential for efficient or complex gaits.
+
+────────────────────────────────────────────────────────────────────────
+Rank   3 / 5  │  ID     9  │  gen   3  │  fitness = +0.53333  (gemini)
+────────────────────────────────────────────────────────────────────────
+  Scores   : coherence=4.0  originality=3.0  interest=7.0
+  Morpho   : legs=4 (root=4 branch=0 bparts=0)  sym=0.383  seg_len=0.332 m
+  Torso    : radius=0.050 m  half-height=0.010 m
+  Render   : results/run_20260417_153300/renders/best/gen0002_id000009.png
+
+  Observation   : The morphology features a central white cylindrical torso positioned low to the ground.
+                    Four limbs are attached laterally to the torso in a symmetrical arrangement. Each limb
+                    consists of at least two segments, ending in a yellow spherical foot. The limbs are
+                    multi-colored (purple, light blue, and yellow). The robot is in a stable, wide-based
+                    crouching stance with all feet making ground contact.
+  Interpretation: The structure is a functional quadruped. It approximates a crab-like morphology through
+                    its low center of gravity and lateral limb attachment, which provides a wide support base.
+                    However, the low limb count (four instead of the characteristic eight or ten of a crab)
+                    deviates from the target. The design is structurally sound for locomotion; the center of
+                    mass is well-contained within the support polygon, suggesting that a stable scuttling gait
+                    is physically plausible and likely efficient.
+  Coherence     : The low-profile and wide stance offer a vague resemblance to a crab, but the four-legged
+                    body plan is more characteristic of a generic quadruped.
+  Originality   : The design follows a standard and common body plan seen in MuJoCo quadruped environments,
+                    with minimal unique structural features.
+  Interest      : The structure is solid and well-balanced; the wide placement of limbs and low torso
+                    suggest high potential for stable and efficient locomotion.
+
+────────────────────────────────────────────────────────────────────────
+Rank   4 / 5  │  ID    18  │  gen   3  │  fitness = +0.53333  (gemini)
+────────────────────────────────────────────────────────────────────────
+  Scores   : coherence=4.0  originality=3.0  interest=7.0
+  Morpho   : legs=5 (root=5 branch=0 bparts=0)  sym=0.015  seg_len=0.339 m
+  Torso    : radius=0.101 m  half-height=0.068 m
+
+  Observation   : The robot features a vertical white cylindrical torso elevated off the ground. It
+                    possesses six limbs attached around the circumference of the cylinder. These limbs vary in
+                    length and color (purple, yellow, and blue/green segments are visible) and terminate in
+                    yellow spherical feet. The stance is upright and stable, with the limbs angled outwards to
+                    create a wide base of support. The right view shows a somewhat radial but slightly
+                    asymmetrical arrangement of the legs.
+  Interpretation: The morphology is a typical multi-legged walker. While the prompt identifies it as a
+                    'crab,' it lacks several key crab-like features: it has a vertical rather than horizontal
+                    body plan, lacks pincers, and has a lower leg count than a typical decapod. However, the
+                    structural design is highly functional for locomotion; the wide footprint and multiple
+                    points of contact ensure static stability. The limb segments are long enough to provide
+                    significant ground clearance and potential for a varied gait.
+  Coherence     : It has a vague resemblance to a crab due to being a multi-legged invertebrate-style robot,
+                    but the vertical orientation of the torso and limb attachment points are more reminiscent
+                    of a spider or a generic 'ant' model.
+  Originality   : The design follows a standard multi-limb arrangement common in MuJoCo simulations. There
+                    are minor variations in limb length and coloring, but the core structural concept is
+                    generic.
+  Interest      : From a locomotion standpoint, the design is solid. The structure suggests high stability
+                    and the legs have a clear range of motion for walking. It is a well-balanced morphology
+                    that is likely to achieve efficient locomotion quickly.
+
+────────────────────────────────────────────────────────────────────────
+Rank   5 / 5  │  ID    16  │  gen   3  │  fitness = +0.56667  (gemini)
+────────────────────────────────────────────────────────────────────────
+  Scores   : coherence=5.0  originality=3.0  interest=7.0
+  Morpho   : legs=5 (root=5 branch=0 bparts=0)  sym=0.005  seg_len=0.286 m
+  Torso    : radius=0.151 m  half-height=0.010 m
+  Render   : results/run_20260417_153300/renders/best/gen0003_id000016.png
+
+  Observation   : The morphology features a flat, circular white torso held parallel to the ground. Four
+                    limbs are attached to the perimeter of the torso: two on the left (blue/light blue) and
+                    two on the right (purple/pink). Each limb consists of two segments connected by a joint,
+                    ending in a yellow spherical foot. The robot is in a stable, upright stance with all four
+                    feet contacting the ground. The legs are angled slightly outward from the torso but remain
+                    relatively vertical, keeping the torso high above the surface.
+  Interpretation: The design bears a partial resemblance to a crab due to the wide, flat body and lateral
+                    leg attachment points. However, it lacks the characteristic number of limbs (four instead
+                    of eight) and the wide, splayed stance of a true crab. Structurally, the robot is
+                    well-balanced with a low center of gravity relative to its base of support. The
+                    multi-segmented limbs provide sufficient range of motion for forward locomotion, though
+                    the proximity of the limbs to one another might cause interference or self-collision
+                    during a gait cycle.
+  Coherence     : Matches the flat body plan and lateral limb attachment of a crab, but lacks the necessary
+                    limb count and wide stance.
+  Originality   : A very standard quadrupedal 'table' design common in MuJoCo simulations, showing little
+                    structural deviation from basic templates.
+  Interest      : The design is structurally sound and stable. The limb length and joint orientation suggest
+                    a high potential for efficient and stable locomotion.

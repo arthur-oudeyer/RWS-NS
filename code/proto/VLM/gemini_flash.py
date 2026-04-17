@@ -1,12 +1,14 @@
 from google import genai
 from google.genai import types
 import json
-import sys
+import sys, os
 import time
 from pathlib import Path
 
 # ── Config ────────────────────────────────────────────────────────────────────
-from code.api_keys import APIKEY_GEMINI
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from api_keys import APIKEY_GEMINI
+
 API_KEY = APIKEY_GEMINI
 
 """

@@ -41,7 +41,7 @@ from typing import Optional
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
-from morphology import MorphologyManager, RobotMorphology, NewMorph, MutateMorphology
+from morphology import MorphologyManager, RobotMorphology, NewMorph, MutateMorphology, compute_spawn_height
 
 # Lazy-import mujoco so the module can be imported even if mujoco is absent
 # (e.g. for reading configs or prompt sets without rendering).
@@ -86,14 +86,15 @@ class RenderConfig:
     debug           : global debug flag.  Can be overridden per render() call.
     debug_dir       : directory where debug renders are saved.
     """
-    width:        int               = 512
-    height:       int               = 512
-    camera_views: list[CameraView]  = field(default_factory=lambda: [
+    width:           int               = 512
+    height:          int               = 512
+    camera_views:    list[CameraView]  = field(default_factory=lambda: [
         CameraView(azimuth=0,  elevation=5, distance=1.8),
         CameraView(azimuth=45, elevation=-50, distance=1.8),
     ])
-    debug:        bool              = False
-    debug_dir:    str               = "debug_renders"
+    debug:           bool              = False
+    debug_dir:       str               = "debug_renders"
+    floor_clearance: float             = 0.05   # metres of clearance above z=0
 
 
 # Sensible default used in __main__ and quick tests
@@ -240,6 +241,14 @@ class MorphologyRenderer:
             print(f"\n  [render] morphology: {morph.name}  "
                   f"legs={enc['n_legs']}  "
                   f"sym={enc['symmetry_score']:.3f}")
+
+        # Auto-adjust spawn height so no part clips the floor.
+        import copy as _copy
+        morph = _copy.copy(morph)
+        morph.spawn_height = compute_spawn_height(morph, self.config.floor_clearance)
+        if dbg:
+            print(f"  [render] spawn_height={morph.spawn_height:.4f} m  "
+                  f"(floor_clearance={self.config.floor_clearance} m)")
 
         self._build(morph, dbg)
 

@@ -1,0 +1,85 @@
+════════════════════════════════════════════════════════════════════════
+  RUN REPORT — run_20260417_151235
+════════════════════════════════════════════════════════════════════════
+  Archive  : archive_final.json
+  Strategy : mu_lambda  (μ=5, λ=5, generations=3)
+  Grader   : gemini   Prompt: crab_morph
+  Entries  : 5 individuals (sorted ascending by fitness)
+════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────
+Rank   1 / 5  │  ID     8  │  gen   3  │  fitness = +0.43333  (gemini)
+────────────────────────────────────────────────────────────────────────
+  Scores   : coherence=4.0  originality=3.0  interest=5.0
+  Morpho   : legs=6 (root=6 branch=0 bparts=0)  sym=0.460  seg_len=0.297 m
+  Torso    : radius=0.101 m  half-height=0.105 m
+
+────────────────────────────────────────────────────────────────────────
+Rank   2 / 5  │  ID     1  │  gen   3  │  fitness = +0.48333  (gemini)
+────────────────────────────────────────────────────────────────────────
+  Scores   : coherence=4.0  originality=3.0  interest=6.0
+  Morpho   : legs=6 (root=6 branch=0 bparts=0)  sym=0.387  seg_len=0.313 m
+  Torso    : radius=0.120 m  half-height=0.040 m
+  Render   : results/run_20260417_151235/renders/best/gen0000_id000001.png
+
+────────────────────────────────────────────────────────────────────────
+Rank   3 / 5  │  ID    17  │  gen   3  │  fitness = +0.48333  (gemini)
+────────────────────────────────────────────────────────────────────────
+  Scores   : coherence=3.0  originality=2.0  interest=7.0
+  Morpho   : legs=7 (root=6 branch=1 bparts=0)  sym=0.347  seg_len=0.303 m
+  Torso    : radius=0.192 m  half-height=0.142 m
+
+  Observation   : The robot consists of a vertical white cylindrical torso elevated above the ground. It has
+                    four segmented limbs attached to the bottom edge of the cylinder, extending outwards and
+                    downwards. Each limb terminates in a yellow spherical foot. The limbs are multi-colored:
+                    one is cyan, one is pink, one is green, and the front-left limb is clearly articulated
+                    with a blue upper segment and a purple lower segment joined by a yellow spherical joint.
+                    The robot maintains an upright stance, supported by its four points of contact.
+  Interpretation: The morphology is a classic quadrupedal design. It provides a stable base of support with
+                    its four-legged stance. However, its resemblance to a crab is minimal; crabs typically
+                    possess a wide, flattened carapace, ten limbs (including pincers), and a more lateral leg
+                    orientation. This design is more reminiscent of a spider or a common 'ant' agent.
+                    Structurally, it is well-balanced for locomotion, with articulated legs that should allow
+                    for effective walking or crawling gaits.
+  Coherence     : It bears only a vague resemblance to a crab due to having multiple legs extending from a
+                    central body. It lacks the flat body, higher leg count, and signature claws of the target
+                    morphology.
+  Originality   : The design is a very standard MuJoCo quadrupedal morphology frequently used in
+                    reinforcement learning, showing little structural innovation.
+  Interest      : From a purely functional standpoint, the structure is solid. The symmetry and limb
+                    articulation suggest a high potential for stable and efficient locomotion.
+
+────────────────────────────────────────────────────────────────────────
+Rank   4 / 5  │  ID    19  │  gen   3  │  fitness = +0.53333  (gemini)
+────────────────────────────────────────────────────────────────────────
+  Scores   : coherence=4.0  originality=3.0  interest=7.0
+  Morpho   : legs=5 (root=5 branch=0 bparts=0)  sym=0.458  seg_len=0.356 m
+  Torso    : radius=0.120 m  half-height=0.098 m
+
+  Observation   : The robot consists of a white vertical cylindrical torso situated moderately high above
+                    the ground. There are four limbs attached radially to the torso's perimeter. Each limb is
+                    a single-segment rod (two blue, two green) terminating in a small yellow spherical foot.
+                    The robot is currently in a wide, stable-looking stance with all four feet making contact
+                    with the grey checkerboard surface. The symmetry appears to be bilateral or slightly
+                    radial across the center axis.
+  Interpretation: While the robot is a multi-legged walker, its resemblance to a crab is limited. Crabs
+                    typically possess a flattened horizontal carapace and at least eight walking legs; this
+                    morphology has a vertical orientation and only four legs. Structurally, it is a very
+                    standard quadruped. The wide footprint and low center of mass relative to the leg span
+                    suggest high static stability, which is a positive trait for locomotion. However, the
+                    simplicity of the single-segment legs might limit the range of motion and efficiency of
+                    the gait.
+  Coherence     : It captures the essence of a multi-legged creature with a central body, but fails to
+                    replicate the crab's high leg count (8-10) or distinctive flat, wide body shape.
+  Originality   : This is a basic quadrupedal design often seen in initial MuJoCo environments. The use of
+                    different colors for side pairs is a minor aesthetic variation on a standard body plan.
+  Interest      : The design is structurally sound and stable. The limb length and attachment points provide
+                    a wide base of support, suggesting a high probability of successful and stable forward
+                    locomotion.
+
+────────────────────────────────────────────────────────────────────────
+Rank   5 / 5  │  ID    14  │  gen   3  │  fitness = +0.70000  (gemini)
+────────────────────────────────────────────────────────────────────────
+  Scores   : coherence=7.0  originality=4.0  interest=8.0
+  Morpho   : legs=5 (root=5 branch=0 bparts=0)  sym=0.476  seg_len=0.257 m
+  Torso    : radius=0.226 m  half-height=0.010 m

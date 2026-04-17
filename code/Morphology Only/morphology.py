@@ -66,48 +66,73 @@ class JointDescriptor:
 @dataclass
 class LegDescriptor:
     """
-    One leg attached either to the torso or to a joint on another leg.
+    One leg attached to the torso, to a secondary body part, or to a joint
+    on another leg (branched).
 
     placement_angle_deg:
         For root legs (parent_leg_idx is None):
             Absolute angle in degrees around the Z axis from the robot's
             front (0 = front, 90 = right, 180 = back, 270 = left).
-            Defines both the torso rim attachment point and the hip swing
-            axis: axis = (-sin θ, cos θ, 0).
+            Defines both the rim attachment point and the hip swing axis:
+            axis = (-sin θ, cos θ, 0).  When body_part_idx is set, the angle
+            is relative to the body part's own frame.
 
         For branched legs:
             Relative rotation angle φ (degrees) around the parent segment's
-            own downward axis (-Z in parent local frame).  The branched
-            leg's swing axis is the parent's swing axis rotated by φ:
-
-                axis_branched = x_parent · cos φ + y_parent · sin φ
-                              = _hip_axis(θ_parent_effective − φ)
-
-            where x_parent = parent's swing axis,
-                  y_parent = parent's radial-outward direction (x_parent rotated
-                             90° CCW around world-Z).
-
-            φ = 0   → same swing direction as the parent leg.
-            φ = 90  → swing perpendicular to parent (rotated 90° CCW from above).
-            φ = 180 → swing opposite to the parent.
-
-            The effective angle propagates recursively, so a branch-of-branch
-            uses the same formula with its own parent's effective angle.
+            own downward axis (-Z in parent local frame).  The effective angle
+            propagates recursively; see MorphologyManager for details.
 
     parent_leg_idx:
         Index in RobotMorphology.legs of the parent leg.
-        None → root leg, attaches to torso rim.
-        Must be < this leg's own index (enforced by MorphologyManager).
+        None → root leg (attaches to torso or body part rim).
+        Must be < this leg's own index.
 
     parent_joint_idx:
-        Index of the joint in the parent leg at whose end-body this leg
-        attaches.  Negative indices are supported (-1 = last joint).
+        Index of the joint in the parent leg at whose end-body this branched
+        leg attaches.  Negative indices supported (-1 = last joint).
         Ignored when parent_leg_idx is None.
+
+    body_part_idx:
+        Index in RobotMorphology.body_parts of the body part this leg's rim
+        attaches to.  None → attach to the main torso rim (default).
+        Ignored when parent_leg_idx is not None (branched legs always attach
+        to their parent leg's joint end-body, not a body part rim).
+        The referenced body part's parent_leg_idx must be < this leg's index.
     """
     placement_angle_deg: float
     joints:              list[JointDescriptor] = field(default_factory=lambda: [JointDescriptor()])
     parent_leg_idx:      Optional[int]         = None
     parent_joint_idx:    Optional[int]         = None
+    body_part_idx:       Optional[int]         = None
+
+
+@dataclass
+class BodyPartDescriptor:
+    """
+    A secondary cylindrical body rigidly attached at the tip of a parent leg.
+
+    Body parts act as structural nodes from which additional root legs can
+    spawn, enabling multi-segment body plans (e.g. insect thorax+abdomen).
+    The body part is welded to the last segment end-body of its parent leg
+    (no joint), so it moves rigidly with the leg in simulation.
+
+    Attributes
+    ----------
+    parent_leg_idx : index in RobotMorphology.legs of the leg whose last
+                     segment tip this body part attaches to.
+                     Must be < any leg that references this body part via
+                     body_part_idx, so the MJCF can be built in one pass.
+    radius         : cylinder radius (m).
+    height         : cylinder half-height (m).
+    euler_deg      : (roll, pitch, yaw) orientation relative to the parent
+                     leg's tip frame, in degrees.
+    rgba           : RGBA colour.
+    """
+    parent_leg_idx: int
+    radius:         float = 0.08
+    height:         float = 0.03
+    euler_deg:      tuple = field(default_factory=lambda: (0., 0., 0.))
+    rgba:           tuple = field(default_factory=lambda: (0.75, 0.75, 0.75, 1.0))
 
 
 @dataclass
@@ -118,6 +143,7 @@ class RobotMorphology:
     """
     name:          str
     legs:          list[LegDescriptor]
+    body_parts:    list[BodyPartDescriptor] = field(default_factory=list)
     torso_radius:  float = 0.12
     torso_height:  float = 0.04
     torso_rgba:    tuple = (0.9, 0.9, 0.9, 1.0)
@@ -180,6 +206,7 @@ class RobotMorphology:
             "n_legs":               len(self.legs),
             "n_root_legs":          len(root_legs),
             "n_branch_legs":        len(branch_legs),
+            "n_body_parts":         len(self.body_parts),
             "n_total_joints":       self.n_joints,
             "symmetry_score":       round(symmetry, 4),
             "total_segment_length": round(sum(all_lengths), 4) if all_lengths else 0.0,
@@ -227,6 +254,78 @@ HEXAPOD = RobotMorphology(
 )
 
 # ---------------------------------------------------------------------------
+# Spawn-height computation — keeps robot above the floor
+# ---------------------------------------------------------------------------
+
+def compute_spawn_height(morph: RobotMorphology, floor_clearance: float = 0.05) -> float:
+    """
+    Compute the minimum torso spawn height (z position) so that no part of
+    the robot (torso bottom, leg tips, body parts) penetrates the floor (z=0).
+
+    The calculation uses the rest-pose geometry:
+      - Each leg segment with rest_angle α and length L drops by L·cos(α)
+        from its attachment point.
+      - Drops along a leg chain accumulate additively (conservative estimate).
+      - Body parts at leg tips extend the drop by the body part's half-height.
+      - Leg tips end in a foot sphere of radius foot_radius.
+
+    All positions are expressed relative to the torso centre (z=0 in torso
+    frame), so the result directly gives the required spawn_height.
+
+    Parameters
+    ----------
+    morph           : RobotMorphology to analyse.
+    floor_clearance : extra clearance above the floor (metres).
+
+    Returns
+    -------
+    Required torso spawn_height in metres.
+    """
+    # Map leg_idx → z of its last joint tip (relative to torso centre, negative = below)
+    leg_tip_z: dict[int, float] = {}
+    # Map body_part_idx → z of its centre
+    body_part_z: dict[int, float] = {}
+    # Map parent_leg_idx → body_part_idx (only one body part per leg)
+    body_part_at_leg: dict[int, int] = {
+        bp.parent_leg_idx: bp_idx for bp_idx, bp in enumerate(morph.body_parts)
+    }
+
+    # Start with torso bottom as minimum drop
+    max_drop: float = morph.torso_height  # half-height of torso cylinder
+
+    for leg_idx, leg in enumerate(morph.legs):
+        # Cumulative Z-drop of this leg's chain (L·cos(α) per segment)
+        z_drop = sum(j.length * math.cos(j.rest_angle) for j in leg.joints)
+
+        # Attachment Z (relative to torso centre)
+        if leg.parent_leg_idx is None and leg.body_part_idx is None:
+            # Root leg — attaches at the torso rim (same Z as torso centre)
+            attach_z = 0.0
+        elif leg.body_part_idx is not None:
+            # Body-part leg — attaches at the body part centre
+            attach_z = body_part_z.get(leg.body_part_idx, 0.0)
+        else:
+            # Branched leg — attaches at its parent leg's tip
+            attach_z = leg_tip_z.get(leg.parent_leg_idx, 0.0)
+
+        tip_z = attach_z - z_drop
+        leg_tip_z[leg_idx] = tip_z
+
+        if leg_idx in body_part_at_leg:
+            # This leg carries a body part at its tip — record body-part Z
+            bp_idx = body_part_at_leg[leg_idx]
+            bp = morph.body_parts[bp_idx]
+            body_part_z[bp_idx] = tip_z
+            # Body part itself extends down by its half-height
+            max_drop = max(max_drop, -tip_z + bp.height)
+        else:
+            # Terminal leg — tip has a foot sphere
+            max_drop = max(max_drop, -tip_z + morph.foot_radius)
+
+    return max_drop + floor_clearance
+
+
+# ---------------------------------------------------------------------------
 # Factory — random morphology
 # ---------------------------------------------------------------------------
 
@@ -261,86 +360,153 @@ def NewMorph(
 # ---------------------------------------------------------------------------
 
 def MutateMorphology(
-    base:             RobotMorphology,
-    length_std:       float = 0.04,
-    angle_std:        float = 12.0,
-    rest_angle_std:   float = 0.15,
-    add_remove_prob:  float = 0.15,
-    allow_branching:  bool  = False,
-    branching_prob:   float = 0.3,
-    torso_radius_std: float = 0.0,   # Gaussian std for torso radius (m); 0 = fixed
-    torso_height_std: float = 0.0,   # Gaussian std for torso half-height (m); 0 = fixed
-    torso_euler_std:  float = 0.0,   # Gaussian std applied to each euler axis (deg); 0 = fixed
-    rng:              Optional[np.random.Generator] = None,
+    base:                      RobotMorphology,
+    length_std:                float = 0.04,
+    angle_std:                 float = 12.0,
+    rest_angle_std:            float = 0.15,
+    add_remove_prob:           float = 0.15,
+    allow_branching:           bool  = False,
+    branching_prob:            float = 0.3,
+    torso_radius_std:          float = 0.0,
+    torso_height_std:          float = 0.0,
+    torso_euler_std:           float = 0.0,
+    add_remove_body_part_prob: float = 0.0,
+    body_part_radius_std:      float = 0.0,
+    body_part_height_std:      float = 0.0,
+    body_part_euler_std:       float = 0.0,
+    body_part_leg_prob:        float = 0.5,
+    rng:                       Optional[np.random.Generator] = None,
 ) -> RobotMorphology:
     """
     Return a mutated copy of base.  The original is never modified.
 
     Parameters
     ----------
-    length_std       : std dev (metres) for Gaussian length perturbations.
-    angle_std        : std dev (degrees) for placement angle jitter.
-    add_remove_prob  : probability [0, 1] of adding or removing one leg.
-    allow_branching  : when adding a leg, whether it can attach to another
-                       leg's segment rather than the torso.
-    torso_radius_std : std dev for torso radius perturbation.  Clamped to [0.05, 0.30].
-    torso_height_std : std dev for torso half-height perturbation.  Clamped to [0.01, 0.25].
-    torso_euler_std  : std dev (degrees) applied independently to each of the three
-                       torso Euler angles (roll, pitch, yaw).  Yaw wraps at ±180°;
-                       roll and pitch are clamped to ±90°.
-    rng              : numpy Generator for reproducibility (uses global default if None).
+    length_std                : std dev (m) for segment length perturbations.
+    angle_std                 : std dev (deg) for placement angle jitter.
+    add_remove_prob           : probability of adding or removing one leg.
+    allow_branching           : allow new legs to branch off another leg's joint.
+    branching_prob            : conditional probability of branching when adding.
+    torso_radius_std          : std dev for torso radius.  0 = fixed.
+    torso_height_std          : std dev for torso half-height.  0 = fixed.
+    torso_euler_std           : std dev (deg) per euler axis.  0 = fixed.
+    add_remove_body_part_prob : probability of adding or removing one body part.
+                                0 = body parts are never mutated (default).
+    body_part_radius_std      : std dev for body part radius.  0 = fixed.
+    body_part_height_std      : std dev for body part height.  0 = fixed.
+    body_part_euler_std       : std dev (deg) per euler axis for body parts.
+    body_part_leg_prob        : when adding a new leg, probability of attaching
+                                it to a random body part (if any exist) rather
+                                than the main torso.
+    rng                       : numpy Generator (uses global default if None).
     """
     if rng is None:
         rng = np.random.default_rng()
 
     new = copy.deepcopy(base)
 
-    # --- Add or remove a leg ---
+    # ── Add or remove a leg ──────────────────────────────────────────────────
     if rng.random() < add_remove_prob:
-        if rng.random() < 0.5 and len(new.legs) < MAX_LEGS:
-            # Add leg
-            angle  = float(rng.uniform(0, 360))
-            color  = (float(rng.uniform(0.2, 0.9)),
-                      float(rng.uniform(0.2, 0.9)),
-                      float(rng.uniform(0.2, 0.9)),
-                      1.0)
-            length = float(rng.uniform(0.12, 0.32))
-
+        if len(new.legs) < MAX_LEGS and rng.random() < 0.5:
+            angle      = float(rng.uniform(0, 360))
+            color      = (float(rng.uniform(0.2, 0.9)),
+                          float(rng.uniform(0.2, 0.9)),
+                          float(rng.uniform(0.2, 0.9)),
+                          1.0)
+            length     = float(rng.uniform(0.12, 0.32))
             rest_angle = float(rng.uniform(-1.5, 1.5))
 
-            if allow_branching and len(new.legs) > 0 and rng.random() < branching_prob:
+            if allow_branching and rng.random() < branching_prob and len(new.legs) > 0:
+                # Branched leg on a parent joint
                 parent_idx   = int(rng.integers(0, len(new.legs)))
                 parent_joint = int(rng.integers(0, len(new.legs[parent_idx].joints)))
                 new.legs.append(LegDescriptor(
                     placement_angle_deg = angle,
-                    joints              = [JointDescriptor(rgba=color, length=length, rest_angle=rest_angle)],
+                    joints              = [JointDescriptor(rgba=color, length=length,
+                                                           rest_angle=rest_angle)],
                     parent_leg_idx      = parent_idx,
                     parent_joint_idx    = parent_joint,
                 ))
-            else:
+            elif new.body_parts and rng.random() < body_part_leg_prob:
+                # New leg on a random secondary body part
+                bp_idx = int(rng.integers(0, len(new.body_parts)))
                 new.legs.append(LegDescriptor(
                     placement_angle_deg = angle,
-                    joints              = [JointDescriptor(rgba=color, length=length, rest_angle=rest_angle)],
+                    joints              = [JointDescriptor(rgba=color, length=length,
+                                                           rest_angle=rest_angle)],
+                    body_part_idx       = bp_idx,
                 ))
-        else:
-            # Remove a random leg if more than one remains
-            if len(new.legs) > 1:
-                idx = int(rng.integers(0, len(new.legs)))
-                new.legs.pop(idx)
-                # Fix broken parent references caused by the removal
-                for leg in new.legs:
-                    if leg.parent_leg_idx is not None:
-                        if leg.parent_leg_idx == idx:
-                            # Parent was removed — promote to root
-                            leg.parent_leg_idx   = None
-                            leg.parent_joint_idx = None
-                        elif leg.parent_leg_idx > idx:
-                            leg.parent_leg_idx -= 1
+            else:
+                # New root leg on the main torso
+                new.legs.append(LegDescriptor(
+                    placement_angle_deg = angle,
+                    joints              = [JointDescriptor(rgba=color, length=length,
+                                                           rest_angle=rest_angle)],
+                ))
 
-    # --- Perturb segment lengths and placement angles ---
+        elif len(new.legs) > 1:
+            # Remove a random leg
+            idx = int(rng.integers(0, len(new.legs)))
+            new.legs.pop(idx)
+
+            # Fix leg parent references
+            for leg in new.legs:
+                if leg.parent_leg_idx is not None:
+                    if leg.parent_leg_idx == idx:
+                        leg.parent_leg_idx   = None
+                        leg.parent_joint_idx = None
+                    elif leg.parent_leg_idx > idx:
+                        leg.parent_leg_idx -= 1
+
+            # Remove body parts whose parent was the deleted leg (collect reversed)
+            orphan_bp = sorted(
+                [i for i, bp in enumerate(new.body_parts) if bp.parent_leg_idx == idx],
+                reverse=True,
+            )
+            for bp_idx in orphan_bp:
+                new.body_parts.pop(bp_idx)
+                for leg in new.legs:
+                    if leg.body_part_idx == bp_idx:
+                        leg.body_part_idx = None
+                    elif leg.body_part_idx is not None and leg.body_part_idx > bp_idx:
+                        leg.body_part_idx -= 1
+
+            # Shift parent_leg_idx in surviving body parts
+            for bp in new.body_parts:
+                if bp.parent_leg_idx > idx:
+                    bp.parent_leg_idx -= 1
+
+    # ── Add or remove a body part ────────────────────────────────────────────
+    if rng.random() < add_remove_body_part_prob:
+        if rng.random() < 0.5:
+            # Add a body part to a leg that doesn't already have one
+            legs_with_bp = {bp.parent_leg_idx for bp in new.body_parts}
+            candidates   = [i for i in range(len(new.legs)) if i not in legs_with_bp]
+            if candidates:
+                parent_idx = candidates[int(rng.integers(0, len(candidates)))]
+                bp_color   = (float(rng.uniform(0.5, 0.85)),
+                              float(rng.uniform(0.5, 0.85)),
+                              float(rng.uniform(0.5, 0.85)),
+                              1.0)
+                new.body_parts.append(BodyPartDescriptor(
+                    parent_leg_idx = parent_idx,
+                    radius         = float(rng.uniform(0.04, 0.14)),
+                    height         = float(rng.uniform(0.01, 0.08)),
+                    rgba           = bp_color,
+                ))
+        elif new.body_parts:
+            # Remove a random body part
+            bp_idx = int(rng.integers(0, len(new.body_parts)))
+            new.body_parts.pop(bp_idx)
+            for leg in new.legs:
+                if leg.body_part_idx == bp_idx:
+                    leg.body_part_idx = None
+                elif leg.body_part_idx is not None and leg.body_part_idx > bp_idx:
+                    leg.body_part_idx -= 1
+
+    # ── Perturb segment lengths and placement angles ─────────────────────────
     for leg in new.legs:
         if leg.parent_leg_idx is None:
-            # Jitter placement angle for root legs only
             leg.placement_angle_deg = float(
                 leg.placement_angle_deg + rng.normal(0, angle_std)
             ) % 360
@@ -355,7 +521,7 @@ def MutateMorphology(
                 j.ctrl_range[0], j.ctrl_range[1],
             ))
 
-    # --- Perturb torso shape and orientation ---
+    # ── Perturb torso ────────────────────────────────────────────────────────
     if torso_radius_std > 0:
         new.torso_radius = float(np.clip(
             new.torso_radius + rng.normal(0, torso_radius_std), 0.05, 0.30,
@@ -371,6 +537,24 @@ def MutateMorphology(
             float(np.clip(ry + rng.normal(0, torso_euler_std), -90.0,  90.0)),
             float((rz + rng.normal(0, torso_euler_std) + 180.0) % 360.0 - 180.0),
         )
+
+    # ── Perturb body parts ───────────────────────────────────────────────────
+    for bp in new.body_parts:
+        if body_part_radius_std > 0:
+            bp.radius = float(np.clip(
+                bp.radius + rng.normal(0, body_part_radius_std), 0.03, 0.25,
+            ))
+        if body_part_height_std > 0:
+            bp.height = float(np.clip(
+                bp.height + rng.normal(0, body_part_height_std), 0.01, 0.15,
+            ))
+        if body_part_euler_std > 0:
+            rx, ry, rz = bp.euler_deg
+            bp.euler_deg = (
+                float(np.clip(rx + rng.normal(0, body_part_euler_std), -90.0,  90.0)),
+                float(np.clip(ry + rng.normal(0, body_part_euler_std), -90.0,  90.0)),
+                float((rz + rng.normal(0, body_part_euler_std) + 180.0) % 360.0 - 180.0),
+            )
 
     return new
 
@@ -390,11 +574,22 @@ def morphology_to_dict(morph: RobotMorphology) -> dict:
         "spawn_height":  morph.spawn_height,
         "foot_radius":   morph.foot_radius,
         "foot_rgba":     list(morph.foot_rgba),
+        "body_parts": [
+            {
+                "parent_leg_idx": bp.parent_leg_idx,
+                "radius":         bp.radius,
+                "height":         bp.height,
+                "euler_deg":      list(bp.euler_deg),
+                "rgba":           list(bp.rgba),
+            }
+            for bp in morph.body_parts
+        ],
         "legs": [
             {
                 "placement_angle_deg": leg.placement_angle_deg,
                 "parent_leg_idx":      leg.parent_leg_idx,
                 "parent_joint_idx":    leg.parent_joint_idx,
+                "body_part_idx":       leg.body_part_idx,
                 "joints": [
                     {
                         "damping":    j.damping,
@@ -416,14 +611,24 @@ def morphology_to_dict(morph: RobotMorphology) -> dict:
 def dict_to_morphology(d: dict) -> RobotMorphology:
     """
     Reconstruct a RobotMorphology from a plain dict.
-    The new parent_leg_idx / parent_joint_idx fields default to None
-    so that saves from the prototype (which lack those keys) still load.
+    All new fields default gracefully so old saves still load.
     """
+    body_parts = [
+        BodyPartDescriptor(
+            parent_leg_idx = bp["parent_leg_idx"],
+            radius         = bp["radius"],
+            height         = bp["height"],
+            euler_deg      = tuple(bp.get("euler_deg", [0., 0., 0.])),
+            rgba           = tuple(bp.get("rgba", [0.75, 0.75, 0.75, 1.0])),
+        )
+        for bp in d.get("body_parts", [])
+    ]
     legs = [
         LegDescriptor(
             placement_angle_deg = leg["placement_angle_deg"],
             parent_leg_idx      = leg.get("parent_leg_idx"),
             parent_joint_idx    = leg.get("parent_joint_idx"),
+            body_part_idx       = leg.get("body_part_idx"),
             joints = [
                 JointDescriptor(
                     damping    = j["damping"],
@@ -432,7 +637,7 @@ def dict_to_morphology(d: dict) -> RobotMorphology:
                     length     = j["length"],
                     radius     = j["radius"],
                     rgba       = tuple(j["rgba"]),
-                    rest_angle = j.get("rest_angle", 0.0),  # default for old saves
+                    rest_angle = j.get("rest_angle", 0.0),
                 )
                 for j in leg["joints"]
             ],
@@ -442,10 +647,11 @@ def dict_to_morphology(d: dict) -> RobotMorphology:
     return RobotMorphology(
         name         = d["name"],
         legs         = legs,
+        body_parts   = body_parts,
         torso_radius = d["torso_radius"],
         torso_height = d["torso_height"],
         torso_rgba   = tuple(d["torso_rgba"]),
-        torso_euler  = tuple(d.get("torso_euler", [0.0, 0.0, 0.0])),  # default for old saves
+        torso_euler  = tuple(d.get("torso_euler", [0.0, 0.0, 0.0])),
         spawn_height = d["spawn_height"],
         foot_radius  = d["foot_radius"],
         foot_rgba    = tuple(d["foot_rgba"]),
@@ -510,6 +716,7 @@ class MorphologyManager:
         prefix:           str,
         attachment_pos:   tuple[float, float, float],
         effective_angle:  float,
+        skip_foot:        bool = False,
     ) -> tuple[ET.Element, list[str], list[ET.Element]]:
         """
         Build the XML subtree for one leg.
@@ -574,8 +781,10 @@ class MorphologyManager:
                 pos  = f"0 0 -{jd.length}",
             )
 
-            if is_last:
-                # Foot sphere — touch point with the ground
+            if is_last and not skip_foot:
+                # Foot sphere — touch point with the ground.
+                # Omitted when a body part attaches at this tip (body part
+                # geom replaces the foot as the terminal contact element).
                 ET.SubElement(end_body, "geom",
                     name     = f"{prefix}foot{leg_idx + 1}_geom",
                     type     = "sphere",
@@ -591,7 +800,42 @@ class MorphologyManager:
         return leg_body, joint_names, segment_ends
 
     # ------------------------------------------------------------------
-    # Torso + all legs
+    # Secondary body part builder
+    # ------------------------------------------------------------------
+
+    def _build_body_part_element(
+        self,
+        bp:     BodyPartDescriptor,
+        bp_idx: int,
+        prefix: str,
+    ) -> ET.Element:
+        """
+        Build the XML body element for one secondary body part.
+
+        The body has no joint — it is rigidly welded to the parent leg's
+        last end-body.  The cylinder geom doubles as the contact surface,
+        replacing the foot sphere of the parent leg.
+        """
+        rx, ry, rz = bp.euler_deg
+        bp_body = ET.Element("body",
+            name = f"{prefix}bpart{bp_idx + 1}",
+            pos  = "0 0 0",
+        )
+        if any(abs(v) > 1e-6 for v in (rx, ry, rz)):
+            bp_body.set("euler", f"{rx:.4f} {ry:.4f} {rz:.4f}")
+
+        ET.SubElement(bp_body, "geom",
+            name     = f"{prefix}bpart{bp_idx + 1}_geom",
+            type     = "cylinder",
+            size     = f"{bp.radius} {bp.height}",
+            rgba     = self._rgba(bp.rgba),
+            condim   = "3",
+            friction = "0.7 0.005 0.0001",
+        )
+        return bp_body
+
+    # ------------------------------------------------------------------
+    # Torso + all legs + body parts
     # ------------------------------------------------------------------
 
     def _build_torso(
@@ -602,8 +846,17 @@ class MorphologyManager:
         y:      float = 0.0,
     ) -> tuple[ET.Element, list[str]]:
         """
-        Build the full torso body with all legs (root and branched).
+        Build the full torso body with all legs (root, branched, body-part-mounted)
+        and all secondary body parts.
         Returns (torso_element, all_joint_names_flat).
+
+        Build order
+        -----------
+        Legs are processed in index order.  When a leg's tip carries a body
+        part, the body part element is inserted inline immediately after that
+        leg is built — ensuring body_part_elements[N] is always populated
+        before any leg with body_part_idx == N is processed.
+        Invariant: body_parts[N].parent_leg_idx < any leg with body_part_idx == N.
         """
         torso = ET.Element("body",
             name = f"{prefix}torso",
@@ -620,15 +873,19 @@ class MorphologyManager:
             rgba  = self._rgba(morph.torso_rgba),
         )
 
-        all_joint_names:     list[str]              = []
+        all_joint_names:     list[str]                   = []
         segment_ends_by_leg: dict[int, list[ET.Element]] = {}
+        body_part_elements:  dict[int, ET.Element]       = {}
 
-        # Compute the effective swing-axis angle for every leg.
-        # Root legs:    effective = placement_angle_deg  (absolute, unchanged)
-        # Branched legs: effective = parent_effective − placement_angle_deg
-        #   → axis_branched = _hip_axis(parent_eff − φ)
-        #     which is the parent's swing axis rotated by φ around the parent
-        #     segment's downward axis.  Propagates recursively for nested branches.
+        # Map leg_idx → (bp_idx, BodyPartDescriptor) for legs that carry a body part
+        body_part_at_leg_tip: dict[int, tuple[int, BodyPartDescriptor]] = {
+            bp.parent_leg_idx: (bp_idx, bp)
+            for bp_idx, bp in enumerate(morph.body_parts)
+        }
+
+        # Effective swing-axis angle per leg.
+        # Root / body-part legs: effective = placement_angle_deg  (in attachment body's frame)
+        # Branched legs:         effective = parent_effective − placement_angle_deg
         effective_angle: dict[int, float] = {}
         for leg_idx, leg in enumerate(morph.legs):
             if leg.parent_leg_idx is None:
@@ -638,11 +895,21 @@ class MorphologyManager:
                 effective_angle[leg_idx] = parent_eff - leg.placement_angle_deg
 
         for leg_idx, leg in enumerate(morph.legs):
-            if leg.parent_leg_idx is None:
-                # Root leg: attach to the torso rim
+            skip_foot = (leg_idx in body_part_at_leg_tip)
+
+            if leg.parent_leg_idx is None and leg.body_part_idx is None:
+                # Root leg on the main torso
                 rx, ry, rz = self._rim_pos(leg.placement_angle_deg, morph.torso_radius)
                 attachment_body = torso
                 attach_pos      = (rx, ry, rz)
+
+            elif leg.body_part_idx is not None:
+                # Leg mounted on a secondary body part
+                bp      = morph.body_parts[leg.body_part_idx]
+                rx, ry, rz = self._rim_pos(leg.placement_angle_deg, bp.radius)
+                attachment_body = body_part_elements[leg.body_part_idx]
+                attach_pos      = (rx, ry, rz)
+
             else:
                 # Branched leg: attach to the end-body of a parent joint
                 parent_idx      = leg.parent_leg_idx
@@ -652,11 +919,20 @@ class MorphologyManager:
 
             leg_elem, jnames, seg_ends = self._build_leg(
                 leg, leg_idx, morph, prefix, attach_pos,
-                effective_angle=effective_angle[leg_idx],
+                effective_angle = effective_angle[leg_idx],
+                skip_foot       = skip_foot,
             )
             attachment_body.append(leg_elem)
             segment_ends_by_leg[leg_idx] = seg_ends
             all_joint_names.extend(jnames)
+
+            # If this leg tip carries a body part, build it inline now so that
+            # any subsequent leg with body_part_idx pointing here can find it.
+            if skip_foot:
+                bp_idx, bp = body_part_at_leg_tip[leg_idx]
+                bp_body    = self._build_body_part_element(bp, bp_idx, prefix)
+                seg_ends[-1].append(bp_body)
+                body_part_elements[bp_idx] = bp_body
 
         return torso, all_joint_names
 

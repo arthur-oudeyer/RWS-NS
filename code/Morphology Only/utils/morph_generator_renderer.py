@@ -52,8 +52,9 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from morphology import (
     RobotMorphology,
-    LegDescriptor, JointDescriptor,
+    LegDescriptor, JointDescriptor, BodyPartDescriptor,
     MIN_LENGTH, MAX_LENGTH,
+    compute_spawn_height,
 )
 from rendering import MorphologyRenderer, RenderConfig, CameraView
 
@@ -90,8 +91,19 @@ class GenParams:
     torso_height_min: float = 0.01
     torso_height_max: float = 0.18
     torso_euler_max:  float = 0.0    # max |angle| per axis (°); 0 = no tilt
+    # Body parts
+    max_body_parts:       int   = 2
+    body_part_prob:       float = 0.2   # prob of adding a body part to each candidate leg
+    body_part_radius_min: float = 0.04
+    body_part_radius_max: float = 0.12
+    body_part_height_min: float = 0.01
+    body_part_height_max: float = 0.08
+    body_part_euler_max:  float = 0.0    # max tilt per axis (°); 0 = no tilt
+    max_body_part_legs:   int   = 4      # max legs to try adding per body part
+    body_part_leg_prob:   float = 0.50   # prob of adding each of those legs
     # Rendering
-    render_size:      int   = 256
+    render_size:      int   = 192
+    floor_clearance:  float = 0.   # metres of clearance above the floor
 
 
 # ---------------------------------------------------------------------------
@@ -113,18 +125,17 @@ def generate_random_morph(params: GenParams, rng: np.random.Generator) -> RobotM
     """
     Generate a random morphology.
 
-    1.  Create N root legs  (N ~ Uniform[n_root_min, n_root_max]).
-    2.  Iterate over all legs; with probability branch_prob attach a new
-        branched leg, continuing up to max_branch_legs total branches and
-        max_branch_depth nesting depth.
-
-    This produces morphologies ranging from simple symmetric spiders to
-    highly irregular branched trees.
+    1. Create N root legs  (N ~ Uniform[n_root_min, n_root_max]).
+    2. Walk legs; with probability branch_prob attach a branched leg
+       (up to max_branch_legs total, max_branch_depth nesting).
+    3. Walk root legs; with probability body_part_prob attach a body part
+       (up to max_body_parts total), then add legs to each body part.
     """
     n_root = int(rng.integers(params.n_root_min, params.n_root_max + 1))
 
-    legs:     list[LegDescriptor] = []
-    depth_of: dict[int, int]      = {}
+    legs:       list[LegDescriptor]     = []
+    body_parts: list[BodyPartDescriptor] = []
+    depth_of:   dict[int, int]           = {}
 
     # --- Root legs ---
     for _ in range(n_root):
@@ -136,13 +147,12 @@ def generate_random_morph(params: GenParams, rng: np.random.Generator) -> RobotM
         depth_of[i] = 0
 
     # --- Branched legs ---
-    # Walk over all legs (including newly added ones) as potential parents.
     n_branches = 0
-    leg_idx = 0
+    leg_idx    = 0
     while leg_idx < len(legs) and n_branches < params.max_branch_legs:
         if depth_of[leg_idx] < params.max_branch_depth and rng.random() < params.branch_prob:
             parent_joint_idx = int(rng.integers(0, len(legs[leg_idx].joints)))
-            new_idx = len(legs)
+            new_idx          = len(legs)
             legs.append(LegDescriptor(
                 placement_angle_deg = float(rng.uniform(0, 360)),
                 joints              = [_random_joint(rng, max_length=0.30)],
@@ -152,6 +162,51 @@ def generate_random_morph(params: GenParams, rng: np.random.Generator) -> RobotM
             depth_of[new_idx] = depth_of[leg_idx] + 1
             n_branches += 1
         leg_idx += 1
+
+    # --- Body parts (only on root legs — no branched children as hosts) ---
+    if params.max_body_parts > 0:
+        root_leg_indices = [i for i in range(n_root)]   # indices of root legs
+        n_body_parts     = 0
+        for parent_leg_idx in root_leg_indices:
+            if n_body_parts >= params.max_body_parts:
+                break
+            if rng.random() > params.body_part_prob:
+                continue
+
+            bp_idx    = len(body_parts)
+            bp_radius = float(rng.uniform(params.body_part_radius_min,
+                                          params.body_part_radius_max))
+            bp_height = float(rng.uniform(params.body_part_height_min,
+                                          params.body_part_height_max))
+            if params.body_part_euler_max > 0:
+                bp_euler = (
+                    float(rng.uniform(-params.body_part_euler_max, params.body_part_euler_max)),
+                    float(rng.uniform(-params.body_part_euler_max, params.body_part_euler_max)),
+                    0.0,
+                )
+            else:
+                bp_euler = (0.0, 0.0, 0.0)
+
+            body_parts.append(BodyPartDescriptor(
+                parent_leg_idx = parent_leg_idx,
+                radius         = bp_radius,
+                height         = bp_height,
+                euler_deg      = bp_euler,
+                rgba           = (float(rng.uniform(0.4, 0.9)),
+                                  float(rng.uniform(0.4, 0.9)),
+                                  float(rng.uniform(0.4, 0.9)),
+                                  1.0),
+            ))
+            n_body_parts += 1
+
+            # Add legs to this body part
+            for _ in range(params.max_body_part_legs):
+                if rng.random() < params.body_part_leg_prob:
+                    legs.append(LegDescriptor(
+                        placement_angle_deg = float(rng.uniform(0, 360)),
+                        joints              = [_random_joint(rng, max_length=0.25)],
+                        body_part_idx       = bp_idx,
+                    ))
 
     # --- Torso shape and orientation ---
     torso_radius = float(rng.uniform(params.torso_radius_min, params.torso_radius_max))
@@ -169,6 +224,7 @@ def generate_random_morph(params: GenParams, rng: np.random.Generator) -> RobotM
     return RobotMorphology(
         name         = name,
         legs         = legs,
+        body_parts   = body_parts,
         torso_radius = torso_radius,
         torso_height = torso_height,
         torso_euler  = torso_euler,
@@ -446,6 +502,22 @@ class MorphSorterApp:
                 self.params.torso_height_min = self.params.torso_height_max
                 self._slider_vars["torso_height_min"].set(self.params.torso_height_max)
 
+        def _bp_r_constraint(attr):
+            if attr == "body_part_radius_min" and self.params.body_part_radius_min > self.params.body_part_radius_max:
+                self.params.body_part_radius_max = self.params.body_part_radius_min
+                self._slider_vars["body_part_radius_max"].set(self.params.body_part_radius_min)
+            elif attr == "body_part_radius_max" and self.params.body_part_radius_max < self.params.body_part_radius_min:
+                self.params.body_part_radius_min = self.params.body_part_radius_max
+                self._slider_vars["body_part_radius_min"].set(self.params.body_part_radius_max)
+
+        def _bp_h_constraint(attr):
+            if attr == "body_part_height_min" and self.params.body_part_height_min > self.params.body_part_height_max:
+                self.params.body_part_height_max = self.params.body_part_height_min
+                self._slider_vars["body_part_height_max"].set(self.params.body_part_height_min)
+            elif attr == "body_part_height_max" and self.params.body_part_height_max < self.params.body_part_height_min:
+                self.params.body_part_height_min = self.params.body_part_height_max
+                self._slider_vars["body_part_height_min"].set(self.params.body_part_height_max)
+
         # ---- Legs section ----
         section("Legs")
         add_slider("n_root_min",      "Min root legs",   1,   8,    1,    True,  _legs_constraint)
@@ -466,6 +538,19 @@ class MorphSorterApp:
         add_slider("torso_height_max", "Height max (m)",  0.01, 0.25, 0.01, False, _torso_h_constraint)
         add_slider("torso_euler_max",  "Tilt max (°)",    0.0,  90.0, 1.0,  False)
 
+        # ---- Body parts section ----
+        separator()
+        section("Body parts")
+        add_slider("max_body_parts",       "Max body parts",    0,    4,    1,    True)
+        add_slider("body_part_prob",       "BP attach prob",    0.0,  1.0,  0.05, False)
+        add_slider("body_part_radius_min", "BP radius min (m)", 0.03, 0.20, 0.01, False, _bp_r_constraint)
+        add_slider("body_part_radius_max", "BP radius max (m)", 0.03, 0.20, 0.01, False, _bp_r_constraint)
+        add_slider("body_part_height_min", "BP height min (m)", 0.01, 0.15, 0.01, False, _bp_h_constraint)
+        add_slider("body_part_height_max", "BP height max (m)", 0.01, 0.15, 0.01, False, _bp_h_constraint)
+        add_slider("body_part_euler_max",  "BP tilt max (°)",   0.0,  90.0, 1.0,  False)
+        add_slider("max_body_part_legs",   "BP max legs",       0,    6,    1,    True)
+        add_slider("body_part_leg_prob",   "BP leg prob",       0.0,  1.0,  0.05, False)
+
         # ---- Render size ----
         separator()
         section("Render size")
@@ -480,6 +565,9 @@ class MorphSorterApp:
                 font=("Courier", 10), activebackground=self._BG2,
                 command=self._on_size_change,
             ).pack(side=tk.LEFT, padx=6)
+        def _floor_cb(_attr):
+            self._init_renderer()
+        add_slider("floor_clearance", "Floor margin (m)", 0.0, 0.30, 0.01, False, _floor_cb)
 
         # ---- Stats ----
         separator()
@@ -509,12 +597,13 @@ class MorphSorterApp:
             self._renderer.close()
         sz = self.params.render_size
         cfg = RenderConfig(
-            width  = sz,
-            height = sz,
-            camera_views = [
+            width           = sz,
+            height          = sz,
+            camera_views    = [
                 CameraView(azimuth=0,   elevation=5,   distance=2.),
                 CameraView(azimuth=45,  elevation=-50, distance=2.),
             ],
+            floor_clearance = self.params.floor_clearance,
         )
         self._renderer = MorphologyRenderer(cfg)
         self._renderer_size = sz
@@ -551,6 +640,7 @@ class MorphSorterApp:
         self._status_var.set(
             f"  {morph.name}   "
             f"legs={enc['n_legs']} (root={enc['n_root_legs']} branch={enc['n_branch_legs']})   "
+            f"bparts={enc['n_body_parts']}   "
             f"sym={enc['symmetry_score']:.2f}"
         )
         self._set_buttons_enabled(True)
@@ -631,16 +721,24 @@ class MorphSorterApp:
     def _update_morph_info(self, morph: RobotMorphology):
         enc = morph.encoding()
         rx, ry, rz = morph.torso_euler
+        bp_lines = ""
+        for i, bp in enumerate(morph.body_parts):
+            n_bp_legs = sum(1 for l in morph.legs if l.body_part_idx == i)
+            bp_lines += f"\n  bp{i+1}: r={bp.radius:.2f} legs={n_bp_legs}"
+        spawn_h = compute_spawn_height(morph, self.params.floor_clearance)
         self._morph_info_var.set(
-            f"Name     : {morph.name}\n"
-            f"Legs     : {enc['n_legs']} total\n"
-            f"  root   : {enc['n_root_legs']}\n"
-            f"  branch : {enc['n_branch_legs']}\n"
-            f"Symmetry : {enc['symmetry_score']:.3f}\n"
-            f"Seg len  : {enc['mean_segment_length']:.3f} m\n"
-            f"Torso r  : {morph.torso_radius:.3f} m\n"
-            f"Torso h  : {morph.torso_height:.3f} m\n"
-            f"Euler    : ({rx:.1f}° {ry:.1f}° {rz:.1f}°)"
+            f"Name      : {morph.name}\n"
+            f"Legs      : {enc['n_legs']} total\n"
+            f"  root    : {enc['n_root_legs']}\n"
+            f"  branch  : {enc['n_branch_legs']}\n"
+            f"Body parts: {enc['n_body_parts']}"
+            f"{bp_lines}\n"
+            f"Symmetry  : {enc['symmetry_score']:.3f}\n"
+            f"Seg len   : {enc['mean_segment_length']:.3f} m\n"
+            f"Torso r   : {morph.torso_radius:.3f} m\n"
+            f"Torso h   : {morph.torso_height:.3f} m\n"
+            f"Euler     : ({rx:.1f}° {ry:.1f}° {rz:.1f}°)\n"
+            f"Spawn h   : {spawn_h:.3f} m"
         )
 
 
