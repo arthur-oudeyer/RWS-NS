@@ -1,18 +1,16 @@
 """
 grader.py
 =========
-CLIP-based morphology fitness grader.
+Morphology fitness graders.
 
 Architecture
 ------------
 MorphologyGrader (abstract base)
-    └─ CLIPGrader   — current implementation using OpenCLIP
+    ├─ CLIPGrader    — local scoring via OpenCLIP
+    └─ GeminiGrader  — VLM scoring via Google Gemini
 
-The abstract base makes it easy to swap in a different backend later
-(e.g. a Gemini or GPT-4V grader) without changing any calling code.
-
-Scoring methods
----------------
+CLIPGrader — scoring methods
+-----------------------------
 "cosine"  (default — multi-label):
     Each prompt is scored independently via its cosine similarity to the
     image embedding.  Scores are in [-1, 1].  Positive prompts do not
@@ -25,38 +23,61 @@ Scoring methods
     Use this when you want prompts to compete, i.e. to measure which
     description fits best.
 
-Fitness formula (both methods):
+CLIPGrader fitness formula (both methods):
     fitness = mean(Σ (pos_weight * pos_score)) − mean(Σ (neg_weight * neg_score))
+
+GeminiGrader — scoring
+-----------------------
+    Sends the image to Gemini and parses a JSON response with three
+    dimensions: coherence, originality, interest (each 0-10).
+    Fitness formula:
+        fitness = (w_coherence * coherence
+                   + w_originality * originality
+                   + w_interest * interest)
+                  / (10 * (w_coherence + w_originality + w_interest))
+    → always in [0, 1].
 
 GraderOutput
 ------------
     fitness      : float — scalar used by the evolution loop for selection.
     raw_scores   : dict[text → float] — every prompt's score, for analysis.
-    method       : "cosine" or "softmax"
-    prompt_set   : name of the PromptSet used.
+    method       : "cosine", "softmax", or "gemini"
+    prompt_set   : name of the PromptSet / GeminiPromptConfig used.
 
 Debug mode
 ----------
-    Set debug=True in CLIPGrader or pass debug=True to score() to:
-      - print per-prompt scores sorted by value
-      - print the final fitness
+    Set debug=True in any grader or pass debug=True to score() to print
+    per-prompt / per-dimension scores and the final fitness.
 
-Usage
------
+Usage — CLIPGrader
+------------------
     from grader import CLIPGrader
-    from prompts import SPIDER_BODY
+    from CLIP_prompts import SPIDER_BODY
 
     grader = CLIPGrader(
-        model_name   = "ViT-B-32",
-        pretrained   = "openai",
-        cache_dir    = "/Volumes/T7_AO/clip-models",
-        prompt_set   = SPIDER_BODY,
+        model_name     = "ViT-B-32",
+        pretrained     = "openai",
+        cache_dir      = "/Volumes/T7_AO/clip-models",
+        prompt_set     = SPIDER_BODY,
         scoring_method = "cosine",
-        debug        = False,
+        debug          = False,
     )
 
-    image   = ...          # PIL.Image
-    result  = grader.score(image)
+    result = grader.score(image)
+
+Usage — GeminiGrader
+--------------------
+    from grader import GeminiGrader
+    from gemini_prompts import INSECT_MORPH
+
+    grader = GeminiGrader(
+        api_key       = "YOUR_KEY",
+        prompt_config = INSECT_MORPH,
+        model_name    = "gemini-2.0-flash",
+        debug         = False,
+    )
+
+    result = grader.score(image)
     print(result.fitness)
     print(result.raw_scores)
 """
@@ -91,7 +112,7 @@ except ImportError:
     _PIL_AVAILABLE = False
 
 sys.path.insert(0, str(Path(__file__).parent))
-from prompts import PromptSet
+from CLIP_prompts import PromptSet
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +342,195 @@ class CLIPGrader(MorphologyGrader):
 
 
 # ---------------------------------------------------------------------------
+# GeminiGrader
+# ---------------------------------------------------------------------------
+
+try:
+    from google import genai as _genai
+    from google.genai import types as _genai_types
+    _GEMINI_AVAILABLE = True
+except ImportError:
+    _GEMINI_AVAILABLE = False
+
+
+class GeminiGrader(MorphologyGrader):
+    """
+    Scores morphology images using Google Gemini (VLM).
+
+    The image is uploaded to the Gemini Files API, scored by the model,
+    then the remote file is deleted.  score() is stateless and can be
+    called for many images.
+
+    Parameters
+    ----------
+    api_key       : Gemini API key.
+    prompt_config : GeminiPromptConfig (from gemini_prompts.py).
+    model_name    : Gemini model ID.  Defaults to "gemini-2.0-flash".
+    debug         : global debug flag.
+
+    Fitness
+    -------
+    Gemini returns coherence / originality / interest scores (each 0-10).
+    Fitness is their weighted average normalised to [0, 1]:
+        fitness = (w_c * coherence + w_o * originality + w_i * interest)
+                  / (10 * (w_c + w_o + w_i))
+    """
+
+    def __init__(
+        self,
+        api_key:       str,
+        prompt_config: "GeminiPromptConfig",  # noqa: F821 — imported lazily below
+        model_name:    str  = "gemini-3-flash-preview",
+        debug:         bool = False,
+    ):
+        if not _GEMINI_AVAILABLE:
+            raise ImportError(
+                "google-genai is required for GeminiGrader.  "
+                "Install with: pip install google-genai"
+            )
+
+        # Store prompt_config as self.prompt_set so the base-class interface
+        # (and GraderOutput.prompt_set = self.prompt_set.name) works unchanged.
+        super().__init__(prompt_set=prompt_config, debug=debug)  # type: ignore[arg-type]
+
+        """
+        Gemini 3.1 Flash-Lite -> gemini-3.1-flash-lite-preview
+        Gemini 3 Flash        -> gemini-3-flash-preview
+        Gemini 3.1 Pro        -> gemini-3.1-pro-preview
+        """
+        self._model_name    = model_name
+        self._prompt_config = prompt_config
+        self._client        = _genai.Client(api_key=api_key)
+
+        if debug:
+            print(f"[grader] GeminiGrader ready — model={model_name}  "
+                  f"config={prompt_config.name}  target={prompt_config.target}")
+
+    # ------------------------------------------------------------------
+    # Scoring
+    # ------------------------------------------------------------------
+
+    def score(
+        self,
+        image: "PILImage.Image",
+        debug: Optional[bool] = None,
+    ) -> GraderOutput:
+        """
+        Score one PIL Image using Gemini and return a GraderOutput.
+
+        The image is uploaded as a PNG, scored, and the remote file is
+        deleted in a finally block.  The image must be in RGB mode.
+        """
+        import io
+        import json
+        import time
+
+        dbg = self.debug if debug is None else debug
+
+        # --- Encode image to PNG bytes ---
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+
+        # --- Upload to Gemini Files API ---
+        if dbg:
+            print(f"  [grader/gemini] Uploading image ({len(png_bytes)//1024} KB)...")
+
+        img_file = self._client.files.upload(
+            file   = io.BytesIO(png_bytes),
+            config = _genai_types.UploadFileConfig(mime_type="image/png"),
+        )
+
+        # Wait for processing
+        while img_file.state.name == "PROCESSING":
+            time.sleep(0.2)
+            img_file = self._client.files.get(name=img_file.name)
+
+        if img_file.state.name == "FAILED":
+            raise RuntimeError("[grader/gemini] Image processing failed on Gemini's side.")
+
+        # --- Query model ---
+        try:
+            response = self._client.models.generate_content(
+                model    = self._model_name,
+                contents = [
+                    _genai_types.Part.from_uri(
+                        file_uri  = img_file.uri,
+                        mime_type = "image/png",
+                    ),
+                    self._prompt_config.prompt,
+                ],
+            )
+            text = response.text
+        finally:
+            self._client.files.delete(name=img_file.name)
+            if dbg:
+                print("  [grader/gemini] Remote file deleted.")
+
+        # --- Parse JSON ---
+        # Strip optional markdown code fences (```json ... ```)
+        stripped = text.strip()
+        if stripped.startswith("```"):
+            stripped = stripped.split("\n", 1)[-1]
+            stripped = stripped.rsplit("```", 1)[0]
+
+        start = stripped.find("{")
+        end   = stripped.rfind("}") + 1
+        if start == -1 or end == 0:
+            raise ValueError(
+                f"[grader/gemini] No JSON found in Gemini response.\n"
+                f"Raw response:\n{text}"
+            )
+
+        parsed = json.loads(stripped[start:end])
+
+        # --- Extract scores ---
+        def _extract_score(key: str) -> float:
+            val = parsed.get(key, {})
+            if isinstance(val, dict):
+                return float(val.get("score", 0))
+            return float(val)
+
+        coherence   = _extract_score("coherence")
+        originality = _extract_score("originality")
+        interest    = _extract_score("interest")
+
+        w = self._prompt_config.weights
+        total_w = w.coherence + w.originality + w.interest
+        fitness = (
+            w.coherence   * coherence
+            + w.originality * originality
+            + w.interest    * interest
+        ) / (10.0 * total_w)
+        fitness = round(fitness, 6)
+
+        raw_scores = {
+            "coherence":   round(coherence,   4),
+            "originality": round(originality, 4),
+            "interest":    round(interest,    4),
+        }
+
+        result = GraderOutput(
+            fitness    = fitness,
+            raw_scores = raw_scores,
+            method     = "gemini",
+            prompt_set = self._prompt_config.name,
+        )
+
+        if dbg:
+            print(f"\n  [grader/gemini] {self._prompt_config.name}  "
+                  f"target={self._prompt_config.target}")
+            print(f"    coherence   = {coherence:.1f}  (w={w.coherence})")
+            print(f"    originality = {originality:.1f}  (w={w.originality})")
+            print(f"    interest    = {interest:.1f}  (w={w.interest})")
+            print(f"  → fitness = {fitness:.5f}")
+            if "observation" in parsed:
+                print(f"  observation: {parsed['observation'][:120]}")
+
+        return result
+
+
+# ---------------------------------------------------------------------------
 # Debug — run directly to test the full grader pipeline
 # ---------------------------------------------------------------------------
 
@@ -328,9 +538,9 @@ if __name__ == "__main__":
     import sys
     sys.path.insert(0, str(Path(__file__).parent))
 
-    from morphology import QUADRIPOD, TRIPOD, HEXAPOD
-    from rendering  import MorphologyRenderer, RenderConfig
-    from prompts    import SPIDER_BODY, MANY_LEGS, COMPACT_STABLE, ALL_PROMPT_SETS
+    from morphology    import QUADRIPOD, TRIPOD, HEXAPOD
+    from rendering     import MorphologyRenderer, RenderConfig
+    from CLIP_prompts  import SPIDER_BODY, MANY_LEGS, COMPACT_STABLE, ALL_PROMPT_SETS
 
     print("=" * 60)
     print("  grader.py — debug mode")

@@ -150,7 +150,7 @@ ALL_PROMPT_SETS: dict[str, PromptSet] = {
 }
 
 
-def get_prompt_set(name: str) -> PromptSet:
+def get_clip_prompt_set(name: str) -> PromptSet:
     """Retrieve a prompt set by name.  Raises KeyError if not found."""
     if name not in ALL_PROMPT_SETS:
         raise KeyError(

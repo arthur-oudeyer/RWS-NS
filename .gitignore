@@ -10,4 +10,4 @@
 .idea/
 **/venv/
 **/.venv/
-code/proto/VLM/api_keys.py
+code/api_keys.py

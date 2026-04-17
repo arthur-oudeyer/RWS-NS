@@ -46,10 +46,14 @@ from config       import ExperimentConfig
 from archive      import MuLambdaArchive, MapEliteArchive
 from evolution    import BaseEvolution, make_evolution
 from rendering    import MorphologyRenderer, RenderConfig, CameraView
-from grader       import CLIPGrader
-from prompts      import get_prompt_set
+from grader       import CLIPGrader, GeminiGrader, MorphologyGrader
+from CLIP_prompts import get_clip_prompt_set
+from gemini_prompts import get_gemini_prompt_set
 from data_handler import MorphologyResult
 
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from api_keys import APIKEY_GEMINI
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -74,16 +78,26 @@ def _make_renderer(cfg: ExperimentConfig) -> MorphologyRenderer:
     return MorphologyRenderer(render_cfg)
 
 
-def _make_grader(cfg: ExperimentConfig) -> CLIPGrader:
+def _make_grader(cfg: ExperimentConfig) -> MorphologyGrader:
     """Build a CLIPGrader from config."""
-    prompt_set = get_prompt_set(cfg.prompt_set_name)
-    return CLIPGrader(
-        model_name     = cfg.clip_model,
-        pretrained     = cfg.clip_pretrained,
-        cache_dir      = cfg.clip_cache_dir,
-        prompt_set     = prompt_set,
-        scoring_method = cfg.scoring_method,
-    )
+    if cfg.grader_type == "clip":
+        prompt_set = get_clip_prompt_set(cfg.prompt_name)
+        return CLIPGrader(
+            model_name     = cfg.clip_model,
+            pretrained     = cfg.clip_pretrained,
+            cache_dir      = cfg.clip_cache_dir,
+            prompt_set     = prompt_set,
+            scoring_method = cfg.scoring_method,
+        )
+    elif cfg.grader_type == "gemini":
+        prompt_set = get_gemini_prompt_set(cfg.prompt_name)
+        return GeminiGrader(
+            api_key=APIKEY_GEMINI,
+            prompt_config=prompt_set,
+            model_name=cfg.gemini_model,
+        )
+    else:
+        raise AttributeError(f"{cfg.grader_type} not recognised as grader.")
 
 
 def _make_archive(cfg: ExperimentConfig) -> Union[MuLambdaArchive, MapEliteArchive]:
@@ -227,17 +241,19 @@ def run(
     if renderer is None:
         print("[experiment] Building renderer...")
         renderer = _make_renderer(cfg)
+        print(f"Renderer initialized : {len(renderer.config.camera_views)} * {renderer.config.width}x{renderer.config.height}")
 
     if grader is None:
         print("[experiment] Building grader...")
         grader = _make_grader(cfg)
+        print("Grader Initialized.")
 
     archive  = _make_archive(cfg)
     rng      = np.random.default_rng(cfg.seed)
     evo: BaseEvolution = make_evolution(cfg, rng)
+    print(f"[experiment] Archive, Random generator, Evolution manager initialized.")
 
-    render_dir = str(run_dir / "renders") if save_renders else None
-
+    print(f"[experiment] Starting experiment with random individuals...")
     # ---- Generation 0: initialise -------------------------------------------
     t0 = time.perf_counter()
     init_results, id_counter = evo.initialise(
@@ -453,7 +469,8 @@ if __name__ == "__main__":
 
     # If any arguments are passed, treat this as a normal CLI run.
     # Use --debug explicitly to run the self-test suite.
-    if len(sys.argv) > 1 and sys.argv[1] != "--debug":
+    print(sys.argv)
+    if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] != "--debug") or (len(sys.argv) > 2):
         _cli()
         sys.exit(0)
 

@@ -80,8 +80,8 @@ class ExperimentConfig:
 
     # ---- Population ---------------------------------------------------------
     mu:              int = 5            # number of parents kept each generation
-    lambda_:         int = 10           # number of offspring produced each generation
-    n_generations:   int = 50
+    lambda_:         int = 5           # number of offspring produced each generation
+    n_generations:   int = 3
 
     # ---- Initial population -------------------------------------------------
     init_n_legs_min: int = 2
@@ -100,11 +100,13 @@ class ExperimentConfig:
     torso_euler_std:  float = 5.0         # Gaussian std per euler axis (degrees)
 
     # ---- Rendering ----------------------------------------------------------
-    render_width:    int  = 256
-    render_height:   int  = 256
+    render_width:    int  = 192
+    render_height:   int  = 192
     camera_views:    list = field(default_factory=lambda: list(DEFAULT_CAMERA_VIEWS))
 
     # ---- Grader -------------------------------------------------------------
+    grader_type = "gemini" # clip | gemini
+
     """
     CLIP ViT-B-32   350 MB   RAM ~1 GB   ~50ms/image
     CLIP ViT-B-16   350 MB   RAM ~1 GB   ~80ms/image
@@ -114,7 +116,16 @@ class ExperimentConfig:
     clip_pretrained: str = "openai"
     clip_cache_dir:  str = "/Volumes/T7_AO/clip-models"
     scoring_method:  str = "cosine"      # "cosine" | "softmax"
-    prompt_set_name: str = "spider_body"
+
+    """
+    Gemini 3.1 Flash-Lite -> gemini-3.1-flash-lite-preview
+    Gemini 3 Flash        -> gemini-3-flash-preview
+    Gemini 3.1 Pro        -> gemini-3.1-pro-preview
+    """
+    gemini_model = "gemini-3-flash-preview"
+
+    # ---- Prompt -------------------------------------------------------------
+    prompt_name = "crab_morph"
 
     # ---- Output -------------------------------------------------------------
     output_dir:            str  = "results"
@@ -176,7 +187,10 @@ class ExperimentConfig:
         """Print a human-readable summary."""
         print(f"\nExperimentConfig: {self.run_id}")
         print(f"  strategy     : {self.strategy}")
-        print(f"  population   : μ={self.mu}  λ={self.lambda_}  generations={self.n_generations}")
+        if self.strategy == "mu_lambda":
+            print(f"  population   : μ={self.mu}  λ={self.lambda_}  generations={self.n_generations}")
+        elif self.strategy == "map_elite":
+            print(f"  population   : μ={self.mu}  λ={self.lambda_}  generations={self.n_generations}")
         print(f"  init legs    : [{self.init_n_legs_min}, {self.init_n_legs_max}]")
         print(f"  mutation     : length_std={self.length_std}  angle_std={self.angle_std}  "
               f"rest_angle_std={self.rest_angle_std}")
@@ -184,8 +198,11 @@ class ExperimentConfig:
         print(f"  torso mut    : radius_std={self.torso_radius_std}  height_std={self.torso_height_std}  "
               f"euler_std={self.torso_euler_std}°")
         print(f"  seed         : {self.seed}")
-        print(f"  grader       : {self.clip_model}  method={self.scoring_method}  "
-              f"prompts={self.prompt_set_name}")
+        if self.grader_type == "clip":
+            print(f"  grader       : {self.clip_model}  method={self.scoring_method}  "
+                  f"prompts={self.prompt_name}")
+        else:
+            print(f"  grader       : {self.gemini_model}  prompts={self.prompt_name}")
         print(f"  render       : {self.render_width}×{self.render_height}  "
               f"views={len(self.camera_views)}")
         best_render = (f"every {self.save_best_every_n_gen} gen"
