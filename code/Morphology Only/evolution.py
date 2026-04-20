@@ -113,14 +113,16 @@ class BaseEvolution(ABC):
         id_counter:  int,
         save_renders: bool = False,
         render_dir:   Optional[str] = None,
+        parent_ids:   Optional[list[int]] = None,
     ) -> tuple[list[MorphologyResult], int]:
         """
         Evaluate a list of morphologies and return (results, new_id_counter).
 
         If save_renders is True and render_dir is given, saves rendered PNGs.
+        parent_ids, if provided, maps each morph to its parent's individual_id.
         """
         results = []
-        for morph in morphs:
+        for i, morph in enumerate(morphs):
             if save_renders and render_dir:
                 Path(render_dir).mkdir(parents=True, exist_ok=True)
                 render_path = str(Path(render_dir) / f"gen{generation:04d}_id{id_counter:06d}.png")
@@ -134,6 +136,7 @@ class BaseEvolution(ABC):
                 generation       = generation,
                 individual_id    = id_counter,
                 render_save_path = render_path,
+                parent_id        = parent_ids[i] if parent_ids else None,
             )
             results.append(r)
             id_counter += 1
@@ -238,23 +241,25 @@ class MuLambdaEvolution(BaseEvolution):
         save_renders: bool = False,
         render_dir:   Optional[str] = None,
     ) -> tuple[list[MorphologyResult], int]:
-        # 1. Sample λ parents from archive
-        parents = archive.get_parents(self.cfg.lambda_)
+        # 1. Sample λ parents from archive (as full results to get IDs)
+        sampled_parents = archive.get_parent_results(self.cfg.lambda_)
+        parent_ids      = [r.individual_id for r in sampled_parents]
 
         # 2. Mutate → λ offspring morphologies
-        offspring_morphs = [self._mutate_one(p) for p in parents]
+        offspring_morphs = [self._mutate_one(r.morphology) for r in sampled_parents]
 
-        # 3. Evaluate offspring
+        # 3. Evaluate offspring, recording which parent each came from
         offspring_results, id_counter = self._evaluate_batch(
             offspring_morphs, renderer, grader,
             generation   = generation,
             id_counter   = id_counter,
             save_renders = save_renders,
             render_dir   = render_dir,
+            parent_ids   = parent_ids,
         )
 
         # 4. Pool = current μ parents (already evaluated, re-tagged for this
-        #    generation so stats are consistent) + λ offspring
+        #    generation so stats are consistent) + λ offspring + σ fresh randoms
         parent_results = [
             MorphologyResult(
                 generation    = generation,
@@ -267,11 +272,25 @@ class MuLambdaEvolution(BaseEvolution):
                 prompt_set    = r.prompt_set,
                 render_path   = r.render_path,
                 grader_extra  = r.grader_extra,
+                parent_id     = r.parent_id,
             )
             for r in archive.population
         ]
 
-        return parent_results + offspring_results, id_counter
+        # σ fresh random morphologies injected each generation (no parent)
+        random_results = []
+        if self.cfg.sigma > 0:
+            random_morphs = self._random_population(self.cfg.sigma)
+            random_results, id_counter = self._evaluate_batch(
+                random_morphs, renderer, grader,
+                generation   = generation,
+                id_counter   = id_counter,
+                save_renders = save_renders,
+                render_dir   = render_dir,
+                parent_ids   = None,
+            )
+
+        return parent_results + offspring_results + random_results, id_counter
 
 
 # ---------------------------------------------------------------------------
@@ -331,11 +350,12 @@ class MapEliteEvolution(BaseEvolution):
         save_renders: bool = False,
         render_dir:   Optional[str] = None,
     ) -> tuple[list[MorphologyResult], int]:
-        # 1. Sample λ parents from filled grid cells
-        parents = archive.get_parents(self.cfg.lambda_)
+        # 1. Sample λ parents from filled grid cells (as full results to get IDs)
+        sampled_parents = archive.get_parent_results(self.cfg.lambda_)
+        parent_ids      = [r.individual_id for r in sampled_parents]
 
         # 2. Mutate → λ offspring morphologies
-        offspring_morphs = [self._mutate_one(p) for p in parents]
+        offspring_morphs = [self._mutate_one(r.morphology) for r in sampled_parents]
 
         # 3. Evaluate offspring only (MAP-Elites never re-evaluates incumbents)
         return self._evaluate_batch(
@@ -344,6 +364,7 @@ class MapEliteEvolution(BaseEvolution):
             id_counter   = id_counter,
             save_renders = save_renders,
             render_dir   = render_dir,
+            parent_ids   = parent_ids,
         )
 
 

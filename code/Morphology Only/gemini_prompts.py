@@ -81,7 +81,7 @@ class GeminiPromptConfig:
 # Prompt builder
 # ---------------------------------------------------------------------------
 
-def build_morphology_prompt(target: str) -> str:
+def build_morphology_prompt(static_target: str, dynamic_target: str) -> str:
     """
     Build the standard morphology evaluation prompt for a given target.
 
@@ -118,8 +118,8 @@ def build_morphology_prompt(target: str) -> str:
     - 2 simultaneous views of the same morphology: left = front/side angle, right = 3/4 perspective
     - dark/grey checkerboard floor
     - Robot has a white cylindrical torso and colored limbs (red, yellow, green, purple...)
-    - The robot's locomotion objective: move forward continuously while staying upright
-    - The robot's morphology objective: looking like a {target} (= target)
+    - The robot's locomotion objective: {dynamic_target}
+    - The robot's morphology objective: looking like a {static_target} (= target)
     
     ═══ ANALYSIS ═══
     
@@ -134,7 +134,7 @@ def build_morphology_prompt(target: str) -> str:
     You are evaluating structural design.
     Based on the static pose and limb layout:
     
-    - Does the morphology resemble a {target}? Identify which features do or do not match.
+    - Does the morphology resemble a {static_target}? Identify which features do or do not match.
     - Does the structure suggest stable locomotion is even physically plausible?
       Consider: center of mass, ground contact points, limb symmetry, joint range of motion (~90°).
     - If the morphology shows originality or promising structural traits, state what they are
@@ -148,12 +148,12 @@ def build_morphology_prompt(target: str) -> str:
     
     SCORING RULES:
     
-    coherence  — How well does the morphology match a {target}?
-      0–2  = no recognizable similarity to a {target}
+    coherence  — How well does the morphology match a {static_target}?
+      0–2  = no recognizable similarity to a {static_target}
       3–4  = vague resemblance, one weak matching feature
-      5–6  = partial match, 1–2 clear {target}-like features present
+      5–6  = partial match, 1–2 clear {static_target}-like features present
       7–8  = strong resemblance, most key features identifiable
-      9–10 = unmistakable likeness, structurally faithful to a {target}
+      9–10 = unmistakable likeness, structurally faithful to a {static_target}
     
     originality  — Is the structural design novel or inventive?
       0–2  = generic, indistinguishable from a randomly generated MuJoCo morphology
@@ -165,7 +165,7 @@ def build_morphology_prompt(target: str) -> str:
     interest  — Evolutionary/locomotion potential from structural analysis alone
       0–2  = structurally implausible: cannot stand, no viable contact points
       3–4  = poor design but not hopeless; major locomotion issues likely
-      5–6  = plausible but inefficient; gait would be limited or unstable
+      5–6  = plausible but inefficient; gait would be limited or unstable, or contains many useless limb
       7–8  = solid design; structure suggests stable and potentially efficient gait
       9–10 = excellent design; high locomotion potential, well-suited to target morphology
     
@@ -182,21 +182,35 @@ def build_morphology_prompt(target: str) -> str:
 INSECT_MORPH = GeminiPromptConfig(
     name    = "insect_morph",
     target  = "insect",
-    prompt  = build_morphology_prompt("insect"),
+    prompt  = build_morphology_prompt("insect", "move forward continuously while staying upright"),
     weights = GeminiScoringWeights(coherence=1.0, originality=0.5, interest=1.5),
 )
 
 SPIDER_MORPH = GeminiPromptConfig(
     name    = "spider_morph",
     target  = "spider",
-    prompt  = build_morphology_prompt("spider"),
+    prompt  = build_morphology_prompt("spider", "move forward continuously while staying upright"),
     weights = GeminiScoringWeights(coherence=1.0, originality=0.5, interest=1.5),
 )
 
 CRAB_MORPH = GeminiPromptConfig(
     name    = "crab_morph",
     target  = "crab",
-    prompt  = build_morphology_prompt("crab"),
+    prompt  = build_morphology_prompt("crab", "move forward continuously while staying upright"),
+    weights = GeminiScoringWeights(coherence=1.0, originality=0.5, interest=1.5),
+)
+
+KANGAROO_MORPH = GeminiPromptConfig(
+    name    = "kangaroo_morph",
+    target  = "kangaroo",
+    prompt  = build_morphology_prompt("kangaroo", "jumping very high with it's legs"),
+    weights = GeminiScoringWeights(coherence=1.0, originality=0.5, interest=1.5),
+)
+
+GOALKEEPER_MORPH = GeminiPromptConfig(
+    name    = "goal_keeper_morph",
+    target  = "humanoid",
+    prompt  = build_morphology_prompt("humanoid", "playing soccer as goal keeper"),
     weights = GeminiScoringWeights(coherence=1.0, originality=0.5, interest=1.5),
 )
 
@@ -207,7 +221,7 @@ CRAB_MORPH = GeminiPromptConfig(
 
 ALL_GEMINI_PROMPT_CONFIGS: dict[str, GeminiPromptConfig] = {
     cfg.name: cfg
-    for cfg in (INSECT_MORPH, SPIDER_MORPH, CRAB_MORPH)
+    for cfg in (INSECT_MORPH, SPIDER_MORPH, CRAB_MORPH, KANGAROO_MORPH, GOALKEEPER_MORPH)
 }
 
 

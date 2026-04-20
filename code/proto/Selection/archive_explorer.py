@@ -32,7 +32,7 @@ import sys
 # anywhere in the project tree
 # ------------------------------------------------------------------
 _HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_HERE, '..', 'Brain'))
+sys.path.insert(0, os.path.join(_HERE, '..', 'Robot'))
 sys.path.insert(0, _HERE)
 
 from saver import load_controller, list_saves

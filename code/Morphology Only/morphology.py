@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
+import config as cfg
 
 # Maximum total legs allowed during mutation
 MAX_LEGS = 8
@@ -335,6 +336,7 @@ def NewMorph(
     min_init_legs: int   = 2,
     max_init_legs: int   = 6,
     torso_radius: float = 0.12,
+    n_init_mutation: int = cfg.ExperimentConfig.init_n_mutation,
 ) -> RobotMorphology:
     """
     Create a random root-only morphology (no branching).
@@ -352,7 +354,10 @@ def NewMorph(
         rest_angle  = float(np.random.uniform(-0.6, 0.4))   # within typical ctrl_range
         legs.append(LegDescriptor(angle, [JointDescriptor(rgba=color, length=length, rest_angle=rest_angle)]))
 
-    return RobotMorphology(name=name, legs=legs, torso_radius=torso_radius)
+    morph = RobotMorphology(name=name, legs=legs, torso_radius=torso_radius)
+    for _ in range(n_init_mutation):
+        morph = MutateMorphology(morph)
+    return morph
 
 
 # ---------------------------------------------------------------------------
@@ -361,20 +366,20 @@ def NewMorph(
 
 def MutateMorphology(
     base:                      RobotMorphology,
-    length_std:                float = 0.04,
-    angle_std:                 float = 12.0,
-    rest_angle_std:            float = 0.15,
-    add_remove_prob:           float = 0.15,
-    allow_branching:           bool  = False,
-    branching_prob:            float = 0.3,
-    torso_radius_std:          float = 0.0,
-    torso_height_std:          float = 0.0,
-    torso_euler_std:           float = 0.0,
-    add_remove_body_part_prob: float = 0.0,
-    body_part_radius_std:      float = 0.0,
-    body_part_height_std:      float = 0.0,
-    body_part_euler_std:       float = 0.0,
-    body_part_leg_prob:        float = 0.5,
+    length_std:                float = cfg.ExperimentConfig.length_std,
+    angle_std:                 float = cfg.ExperimentConfig.angle_std,
+    rest_angle_std:            float = cfg.ExperimentConfig.rest_angle_std,
+    add_remove_prob:           float = cfg.ExperimentConfig.add_remove_prob,
+    allow_branching:           bool  = cfg.ExperimentConfig.allow_branching,
+    branching_prob:            float = cfg.ExperimentConfig.branching_prob,
+    torso_radius_std:          float = cfg.ExperimentConfig.torso_radius_std,
+    torso_height_std:          float = cfg.ExperimentConfig.torso_height_std,
+    torso_euler_std:           float = cfg.ExperimentConfig.torso_euler_std,
+    add_remove_body_part_prob: float = cfg.ExperimentConfig.add_remove_body_part_prob,
+    body_part_radius_std:      float = cfg.ExperimentConfig.body_part_radius_std,
+    body_part_height_std:      float = cfg.ExperimentConfig.body_part_height_std,
+    body_part_euler_std:       float = cfg.ExperimentConfig.body_part_euler_std,
+    body_part_leg_prob:        float = cfg.ExperimentConfig.body_part_leg_prob,
     rng:                       Optional[np.random.Generator] = None,
 ) -> RobotMorphology:
     """
@@ -401,7 +406,7 @@ def MutateMorphology(
     rng                       : numpy Generator (uses global default if None).
     """
     if rng is None:
-        rng = np.random.default_rng()
+        rng = np.random.default_rng()  # truly random; seeded rng is the caller's responsibility
 
     new = copy.deepcopy(base)
 
@@ -478,24 +483,31 @@ def MutateMorphology(
 
     # ── Add or remove a body part ────────────────────────────────────────────
     if rng.random() < add_remove_body_part_prob:
-        if rng.random() < 0.5:
-            # Add a body part to a leg that doesn't already have one
-            legs_with_bp = {bp.parent_leg_idx for bp in new.body_parts}
-            candidates   = [i for i in range(len(new.legs)) if i not in legs_with_bp]
-            if candidates:
-                parent_idx = candidates[int(rng.integers(0, len(candidates)))]
-                bp_color   = (float(rng.uniform(0.5, 0.85)),
-                              float(rng.uniform(0.5, 0.85)),
-                              float(rng.uniform(0.5, 0.85)),
-                              1.0)
-                new.body_parts.append(BodyPartDescriptor(
-                    parent_leg_idx = parent_idx,
-                    radius         = float(rng.uniform(0.04, 0.14)),
-                    height         = float(rng.uniform(0.01, 0.08)),
-                    rgba           = bp_color,
-                ))
-        elif new.body_parts:
-            # Remove a random body part
+        legs_with_bp = {bp.parent_leg_idx for bp in new.body_parts}
+        can_add    = len(legs_with_bp) < len(new.legs)
+        can_remove = len(new.body_parts) > 0
+
+        # Only use the coin flip when both actions are possible; otherwise
+        # take the only feasible action so the probability budget is not wasted.
+        if can_add and can_remove:
+            do_add = rng.random() < 0.5
+        else:
+            do_add = can_add
+
+        if do_add:
+            candidates = [i for i in range(len(new.legs)) if i not in legs_with_bp]
+            parent_idx = candidates[int(rng.integers(0, len(candidates)))]
+            bp_color   = (float(rng.uniform(0.5, 0.85)),
+                          float(rng.uniform(0.5, 0.85)),
+                          float(rng.uniform(0.5, 0.85)),
+                          1.0)
+            new.body_parts.append(BodyPartDescriptor(
+                parent_leg_idx = parent_idx,
+                radius         = float(rng.uniform(0.04, 0.14)),
+                height         = float(rng.uniform(0.01, 0.08)),
+                rgba           = bp_color,
+            ))
+        elif can_remove:
             bp_idx = int(rng.integers(0, len(new.body_parts)))
             new.body_parts.pop(bp_idx)
             for leg in new.legs:

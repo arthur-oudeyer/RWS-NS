@@ -79,26 +79,30 @@ class ExperimentConfig:
 
     # ---- Population ---------------------------------------------------------
     mu:              int = 5            # number of parents kept each generation
-    lambda_:         int = 5            # number of offspring produced each generation
-    n_generations:   int = 3
+    lambda_:         int = 10           # number of offspring produced each generation from the mu best parents
+    sigma:           int = 5            # number of fresh random morphologies injected each generation
+    n_generations:   int = 10
+
+    # Time estimation : 10,3s * (mu + lambda + sigma) * n_generations
 
     # ---- Initial population -------------------------------------------------
     init_n_legs_min: int = 2
     init_n_legs_max: int = 6
+    init_n_mutation: int = 5
 
     # ---- Mutation -----------------------------------------------------------
-    length_std:       float = 0.05        # Gaussian std for segment length (m) (base length ~0.25)
+    length_std:       float = 0.1        # Gaussian std for segment length (m) (base length ~0.25)
     angle_std:        float = 12.0        # Gaussian std for placement angle (deg) (angle pos torso / relative angle for swing axis for branched)
-    rest_angle_std:   float = 0.15        # Gaussian std for rest angle (rad)
+    rest_angle_std:   float = 0.2        # Gaussian std for rest angle (rad) (1 ~ 58°)
     add_remove_prob:  float = 0.5         # probability of adding or removing a leg
     allow_branching:  bool  = True        # whether mutation can create branched legs
-    branching_prob:   float = 0.5        # conditional prob of adding a branched leg
+    branching_prob:   float = 0.6        # conditional prob of adding a branched leg
     # Torso mutation (0.0 = keep fixed, i.e. torso shape/orientation unchanged)
     torso_radius_std: float = 0.05         # Gaussian std for torso radius (m)
     torso_height_std: float = 0.05         # Gaussian std for torso half-height (m)
     torso_euler_std:  float = 5.0         # Gaussian std per euler axis (degrees)
     # Body part mutation
-    add_remove_body_part_prob: float = 0.1  # prob of adding/removing a body part (0 = disabled)
+    add_remove_body_part_prob: float = 0.25  # prob of adding/removing a body part (0 = disabled)
     body_part_radius_std:      float = 0.02
     body_part_height_std:      float = 0.01
     body_part_euler_std:       float = 5.0
@@ -111,31 +115,27 @@ class ExperimentConfig:
     floor_clearance: float = 0   # metres of clearance above z=0 (auto spawn-height)
 
     # ---- Grader -------------------------------------------------------------
-    grader_type = "gemini" # clip | gemini
+    grader_type: str = "gemini"  # "clip" | "gemini"
 
-    """
-    CLIP ViT-B-32   350 MB   RAM ~1 GB   ~50ms/image
-    CLIP ViT-B-16   350 MB   RAM ~1 GB   ~80ms/image
-    CLIP ViT-L-14   890 MB   RAM ~2 GB   ~150ms/image
-    """
+    # CLIP ViT-B-32   350 MB   RAM ~1 GB   ~50ms/image
+    # CLIP ViT-B-16   350 MB   RAM ~1 GB   ~80ms/image
+    # CLIP ViT-L-14   890 MB   RAM ~2 GB   ~150ms/image
     clip_model:      str = "ViT-L-14"
     clip_pretrained: str = "openai"
     clip_cache_dir:  str = "/Volumes/T7_AO/clip-models"
-    scoring_method:  str = "cosine"      # "cosine" | "softmax"
+    scoring_method:  str = "cosine"       # "cosine" | "softmax"
 
-    """
-    Gemini 3.1 Flash-Lite -> gemini-3.1-flash-lite-preview
-    Gemini 3 Flash        -> gemini-3-flash-preview
-    Gemini 3.1 Pro        -> gemini-3.1-pro-preview
-    """
-    gemini_model = "gemini-3-flash-preview"
+    # Gemini 3.1 Flash-Lite -> gemini-3.1-flash-lite-preview    ~8s/image
+    # Gemini 3 Flash        -> gemini-3-flash-preview           ~10s/image
+    # Gemini 3.1 Pro        -> gemini-3.1-pro-preview           ~15s/image
+    gemini_model:    str = "gemini-3-flash-preview"
 
     # ---- Prompt -------------------------------------------------------------
-    prompt_name = "crab_morph"
+    prompt_name:     str = "goal_keeper_morph"
 
     # ---- Output -------------------------------------------------------------
     output_dir:            str  = "results"
-    save_every_n_gen:      int  = 5     # save archive snapshot every N generations
+    save_every_n_gen:      int  = 1     # save archive snapshot every N generations
     # Render saving — which individuals to render and keep as PNGs.
     # save_best_every_n_gen : render the best individual every N generations
     #                         (0 = disabled).  Saved to renders/best/gen{N:04d}.png

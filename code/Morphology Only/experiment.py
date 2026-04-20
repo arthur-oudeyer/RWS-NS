@@ -49,7 +49,7 @@ from rendering    import MorphologyRenderer, RenderConfig, CameraView
 from grader       import CLIPGrader, GeminiGrader, MorphologyGrader
 from CLIP_prompts import get_clip_prompt_set
 from gemini_prompts import get_gemini_prompt_set
-from data_handler import MorphologyResult
+from data_handler import MorphologyResult, result_to_dict
 from report       import generate_report
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -151,6 +151,13 @@ def _save_best_render(archive, renderer, run_dir: Path, label: str) -> Optional[
     return str(save_path)
 
 
+def _log_individuals(log_path: Path, individuals: list[MorphologyResult]) -> None:
+    """Append one JSON line per individual to individuals_log.jsonl."""
+    with open(log_path, "a") as f:
+        for r in individuals:
+            f.write(json.dumps(result_to_dict(r)) + "\n")
+
+
 def _log_generation(
     log_path:   Path,
     generation: int,
@@ -228,8 +235,9 @@ def run(
     -------
     The final archive after n_generations steps.
     """
-    run_dir  = cfg.run_dir
-    log_path = run_dir / "log.jsonl"
+    run_dir       = cfg.run_dir
+    log_path      = run_dir / "log.jsonl"
+    indiv_log_path = run_dir / "individuals_log.jsonl"
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # Save frozen config
@@ -266,6 +274,7 @@ def run(
     )
     archive.update(init_results)
     elapsed = time.perf_counter() - t0
+    _log_individuals(indiv_log_path, init_results)
 
     _print_progress(0, cfg.n_generations, "init", init_results, archive, elapsed)
     _log_generation(log_path, 0, "init", init_results, archive, elapsed)
@@ -283,6 +292,7 @@ def run(
             str(run_dir / "renders" / f"gen{generation:04d}")
             if save_renders else None
         )
+        prev_id = id_counter
         results, id_counter = evo.step(
             archive      = archive,
             renderer     = renderer,
@@ -294,6 +304,8 @@ def run(
         )
         archive.update(results)
         elapsed = time.perf_counter() - t0
+        # Only log truly new individuals (offspring), not re-tagged parents
+        _log_individuals(indiv_log_path, [r for r in results if r.individual_id >= prev_id])
 
         _print_progress(generation, cfg.n_generations, "step", results, archive, elapsed)
         _log_generation(log_path, generation, "step", results, archive, elapsed)
@@ -345,9 +357,10 @@ def resume(
     -------
     The final archive.
     """
-    run_dir  = Path(run_dir)
-    cfg      = ExperimentConfig.load(str(run_dir / "config.json"))
-    log_path = run_dir / "log.jsonl"
+    run_dir        = Path(run_dir)
+    cfg            = ExperimentConfig.load(str(run_dir / "config.json"))
+    log_path       = run_dir / "log.jsonl"
+    indiv_log_path = run_dir / "individuals_log.jsonl"
 
     # Find latest snapshot
     snapshots = sorted(run_dir.glob("archive_gen*.json"))
@@ -379,6 +392,7 @@ def resume(
     rng      = np.random.default_rng(cfg.seed + start_gen)   # advance seed
     evo      = make_evolution(cfg, rng)
 
+    print("[experiment] Done, loop restarted.")
     # Resume loop
     for generation in range(start_gen, cfg.n_generations + 1):
         t0 = time.perf_counter()
@@ -387,6 +401,7 @@ def resume(
             str(run_dir / "renders" / f"gen{generation:04d}")
             if save_renders else None
         )
+        prev_id = id_counter
         results, id_counter = evo.step(
             archive      = archive,
             renderer     = renderer,
@@ -398,6 +413,7 @@ def resume(
         )
         archive.update(results)
         elapsed = time.perf_counter() - t0
+        _log_individuals(indiv_log_path, [r for r in results if r.individual_id >= prev_id])
 
         _print_progress(generation, cfg.n_generations, "step", results, archive, elapsed)
         _log_generation(log_path, generation, "step", results, archive, elapsed)

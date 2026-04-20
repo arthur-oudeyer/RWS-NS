@@ -66,6 +66,7 @@ class GenerationStats:
     mean_fitness:       float
     std_fitness:        float
     best_individual_id: int
+    best_raw_scores:    dict = field(default_factory=dict)
 
     def __str__(self) -> str:
         return (
@@ -89,6 +90,7 @@ def _make_stats(generation: int, results: list[MorphologyResult]) -> GenerationS
         mean_fitness       = statistics.mean(fitnesses),
         std_fitness        = statistics.stdev(fitnesses) if len(fitnesses) > 1 else 0.0,
         best_individual_id = best.individual_id,
+        best_raw_scores    = best.raw_scores,
     )
 
 
@@ -148,6 +150,14 @@ class MuLambdaArchive:
             return random.sample(morphs, n)
         return random.choices(morphs, k=n)
 
+    def get_parent_results(self, n: int) -> list[MorphologyResult]:
+        """Return n MorphologyResult objects from the population (with replacement if needed)."""
+        if not self.population:
+            raise RuntimeError("Archive is empty — populate it first.")
+        if n <= len(self.population):
+            return random.sample(self.population, n)
+        return random.choices(self.population, k=n)
+
     # ---- Summary -----------------------------------------------------------
 
     def summary(self) -> None:
@@ -183,7 +193,18 @@ class MuLambdaArchive:
     def from_dict(cls, d: dict) -> MuLambdaArchive:
         archive            = cls(mu=d["mu"])
         archive.population = [dict_to_result(r) for r in d["population"]]
-        archive.history    = [GenerationStats(**s) for s in d["history"]]
+        archive.history    = [
+            GenerationStats(
+                generation         = s["generation"],
+                n_evaluated        = s["n_evaluated"],
+                best_fitness       = s["best_fitness"],
+                mean_fitness       = s["mean_fitness"],
+                std_fitness        = s["std_fitness"],
+                best_individual_id = s["best_individual_id"],
+                best_raw_scores    = s.get("best_raw_scores", {}),
+            )
+            for s in d["history"]
+        ]
         return archive
 
     def save(self, path: str) -> None:
@@ -288,6 +309,15 @@ class MapEliteArchive:
             return random.sample(morphs, n)
         return random.choices(morphs, k=n)
 
+    def get_parent_results(self, n: int) -> list[MorphologyResult]:
+        """Return n MorphologyResult objects from filled grid cells (with replacement if needed)."""
+        if not self.grid:
+            raise RuntimeError("Archive grid is empty — populate it first.")
+        filled = list(self.grid.values())
+        if n <= len(filled):
+            return random.sample(filled, n)
+        return random.choices(filled, k=n)
+
     # ---- Summary -----------------------------------------------------------
 
     def summary(self) -> None:
@@ -327,7 +357,18 @@ class MapEliteArchive:
         for k_str, v in d["grid"].items():
             key = tuple(int(x) for x in k_str.strip("()").split(", "))
             archive.grid[key] = dict_to_result(v)
-        archive.history = [GenerationStats(**s) for s in d["history"]]
+        archive.history = [
+            GenerationStats(
+                generation         = s["generation"],
+                n_evaluated        = s["n_evaluated"],
+                best_fitness       = s["best_fitness"],
+                mean_fitness       = s["mean_fitness"],
+                std_fitness        = s["std_fitness"],
+                best_individual_id = s["best_individual_id"],
+                best_raw_scores    = s.get("best_raw_scores", {}),
+            )
+            for s in d["history"]
+        ]
         return archive
 
     def save(self, path: str) -> None:

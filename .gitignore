@@ -7,7 +7,8 @@
 **/*.pkl
 **/__pycache__/
 **/*.icloud
-.idea/
+.idea/*
 **/venv/
 **/.venv/
 code/api_keys.py
+code/Morphology Only/results/*/*

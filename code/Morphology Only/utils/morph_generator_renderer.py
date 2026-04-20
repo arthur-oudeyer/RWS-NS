@@ -54,7 +54,7 @@ from morphology import (
     RobotMorphology,
     LegDescriptor, JointDescriptor, BodyPartDescriptor,
     MIN_LENGTH, MAX_LENGTH,
-    compute_spawn_height,
+    compute_spawn_height, NewMorph
 )
 from rendering import MorphologyRenderer, RenderConfig, CameraView
 
@@ -72,6 +72,7 @@ _NEG_DIR     = _SOURCE_ROOT / "negative"
 # ---------------------------------------------------------------------------
 # Generation parameters  (modified live by sliders)
 # ---------------------------------------------------------------------------
+USE_DEFAULT_MORPH_GENERATOR = True
 
 @dataclass
 class GenParams:
@@ -624,7 +625,10 @@ class MorphSorterApp:
         self.root.update_idletasks()   # flush UI before blocking render
 
         try:
-            morph = generate_random_morph(self.params, self.rng)
+            if USE_DEFAULT_MORPH_GENERATOR:
+                morph = NewMorph()
+            else:
+                morph = generate_random_morph(self.params, self.rng)
             image = self._renderer.render(morph)
         except Exception as exc:
             self._status_var.set(f"  ERROR: {exc}")

@@ -13,10 +13,10 @@ from morphology import QUADRIPOD, TRIPOD, HEXAPOD, RobotMorphology
 # Feature Activation
 # ---------------------------------------------------------------------------
 VIEWER_ON = True
-VIDEO_RENDERER_ON = True
+VIDEO_RENDERER_ON = False
 
 DATA_MODE = "Full" # StartStop / Full
-SAVE_BEST = False # Create a "last_best.pkl" according to descriptor
+SAVE_BEST = True # Create a "last_best.pkl" according to descriptor
 UNIQUE_SAVE_BEST = False # Create a "best_392304702147.pkl"
 
 SHOW_LIVE_POS_ON = False
@@ -24,7 +24,7 @@ SHOW_LIVE_POS_ON = False
 # ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
-N                   = 13    # number of robots to simulate in parallel
+N                   = 7    # number of robots to simulate in parallel
 ROBOT_SPACING       = 1.    # distance between robots in the viewer (metres)
 SIMULATION_DURATION = 5.0    # seconds
 ROBOT_CONTROL = "external"    # pre-configured / external
@@ -42,7 +42,7 @@ ROBOT_CONTROL = "external"    # pre-configured / external
 # {"source": "last_best",                 → load all from the latest best robot saved and mutate it according to parameter
 #  "indices": "mutation",
 #  "amplitude": 0.2, "variation": 0.1}
-CONTROLLER_INIT = None #"last_best" #{"source": "last_best", "indices": "mutation", "amplitude": 0.3, "variation": 0.3, "morph_amp": 0.2, "morph_var": 0.3, "morph_mod": 0.2}
+CONTROLLER_INIT = "last_best" #{"source": "last_best", "indices": "mutation", "amplitude": 0.3, "variation": 0.3, "morph_amp": 0.2, "morph_var": 0.3, "morph_mod": 0.2}
 CLEAR_ARCHIVE = False
 
 # ---------------------------------------------------------------------------

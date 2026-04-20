@@ -1,201 +1,147 @@
 # RWS-NS-Proto
 
-Prototype for evolving locomotion controllers on simulated legged robots using MuJoCo physics and a custom neural network. Robots have programmable morphologies (leg count, joint sizes) that can be mutated alongside their neural network weights.
+**Real-world similarity as an optimisation criterion for Quality-Diversity algorithms in morphology / motion search**
+
+---
+
+## Research question
+
+When an evolutionary algorithm explores morphologies or locomotion behaviours for bio-inspired robots, how should it select the most "promising" ones?  
+Humans can quickly assess whether a creature resembles something found in nature — and if it does, natural selection has likely already validated that it has interesting properties.
+
+**Hypothesis:** using *"how much does this robot look like a real animal I know?"* as a selection criterion in a Quality-Diversity algorithm can guide evolution toward efficient, diverse, and interpretable solutions.
+
+**Core question:** Can a VLM (Vision Language Model) that scores the visual similarity of robot morphologies/motions to real biological counterparts be used as a fitness criterion in a QD algorithm — and does it *improve* the solutions found?
+
+**"Improve":** find solutions faster, find more diverse solutions, find more energy-efficient solutions, find more interpretable solutions.
+
+---
+## Framework
+
+![framework](./GlobalFramework.png)
 
 ---
 
 ## Project structure
 
 ```
-code/proto/
-├── Mujoco/                   # Simulation layer
-│   ├── main_sim.py           # Entry point — run this
-│   ├── sim_config.py         # All configuration (edit this for experiments)
-│   ├── control.py            # Sensor reading + controller dispatch
-│   ├── robot_config.py       # Derived robot properties (N_HIP from morphology)
-│   ├── display.py            # Multi-robot viewer (square grid layout)
-│   ├── data.py               # DataManager — records sensors, computes metrics, saves best
-│   ├── video_render.py       # Optional per-robot video export
-│   └── demo/                 # Standalone demo scripts
+RWS-NS-Proto/
+├── code/
+│   ├── proto/                   # Proof-of-concept: locomotion evolution + VLM scoring
+│   │   ├── Mujoco/              # MuJoCo simulation: physics, viewer, data recording
+│   │   ├── Robot/               # Robot morphology descriptors + neural-network brain
+│   │   ├── VLM/                 # Standalone VLM scoring scripts (Gemini, CLIP, Gemma)
+│   │   ├── Selection/           # Archive explorer + individual selector
+│   │   └── api_keys.py          # API keys (not committed)
+│   │
+│   └── Morphology Only/         # Main experiment: morphology-only VLM evolution
+│       ├── experiment.py        # Entry point — run() and resume()
+│       ├── config.py            # ExperimentConfig — all parameters
+│       ├── morphology.py        # RobotMorphology + MutateMorphology
+│       ├── rendering.py         # MuJoCo image renderer
+│       ├── grader.py            # CLIP / Gemini graders
+│       ├── evolution.py         # (μ+λ+σ) and MAP-Elites strategies
+│       ├── archive.py           # Population archives
+│       ├── data_handler.py      # MorphologyResult + evaluate()
+│       ├── CLIP_prompts.py      # Prompt sets for CLIP grader
+│       ├── gemini_prompts.py    # Prompt configs for Gemini grader
+│       ├── report.py            # Human-readable run report generator
+│       ├── prompt_tester.py     # Interactive prompt comparison tool
+│       └── utils/
+│           └── morph_generator_renderer.py  # Interactive morphology viewer
 │
-└── Brain/                    # Controller layer
-    ├── controller.py         # Selects and initialises the active controller
-    ├── morphology.py         # Morphology descriptors, XML generation, MutateMorphology()
-    ├── simple_brain.py       # Neural network controller + Mutate()
-    ├── saver.py              # Save / load NeuralNetwork + morphologies to Brain/saves/
-    ├── saves/                # Persisted controllers (.pkl files)
-    └── simplebrain_loc/
-        ├── brain.py          # NeuralNetwork, Layer, Neuron classes
-        ├── butils.py         # Activation functions (tanh, sigmoid)
-        ├── bmath.py          # Math helpers, random, normal distribution
-        ├── bgradient.py      # Gradient utilities
-        └── bmutation.py      # Mutation helpers
+├── doc/                         # Research notes and references
+└── rsc/                         # UI mockups and assets
+```
+
+---
+
+## Experimental pipeline
+
+```
+ExperimentConfig
+      │
+      ▼
+MutateMorphology ──► MorphologyRenderer ──► VLM Grader ──► fitness score
+      ▲                                                           │
+      └──────────── Evolution Archive ◄───────────────────────────┘
+                   (MuLambda / MAP-Elites)
+```
+
+1. **Morphology** — procedural robot bodies: cylindrical torso, legs with joints, optional body parts, branching supported. Fully serialisable to MuJoCo XML.
+2. **Renderer** — renders the morphology from multiple camera angles into images (no motion, no physics step required).
+3. **Grader** — a VLM (CLIP or Gemini) scores the image against a natural-creature prompt. Returns a fitness ∈ [0, 1] and per-criterion scores.
+4. **Archive** — stores the population; `(μ+λ+σ)` keeps the best μ each generation, MAP-Elites fills a behaviour grid.
+5. **Results** — per-generation logs, archive snapshots, rendered PNGs, genealogy stream, and an auto-generated text report.
+
+---
+
+## Graders
+
+| Grader | Model | Input | Notes |
+|--------|-------|-------|-------|
+| CLIP | ViT-B/L-14 | image + text prompts | cosine or softmax scoring |
+| Gemini | gemini-3-flash / gemini-3.1-pro | image + structured prompt | returns scored dimensions + reasoning |
+
+The Gemini grader scores three dimensions (coherence, originality, interest) with configurable weights per prompt, and returns a natural-language observation + interpretation alongside the scores.
+
+---
+
+## Code modules at a glance
+
+### `code/proto/` — proof of concept
+
+| Module | Role |
+|--------|------|
+| `Mujoco/` | Physics simulation of N robots in parallel, viewer, data recording, video export |
+| `Robot/` | `RobotMorphology` + neural-network brain (`simple_brain.py`), save/load |
+| `VLM/` | Standalone Gemini / CLIP / Gemma scoring scripts for video and image |
+| `Selection/` | Archive browser and individual selector helpers |
+
+### `code/Morphology Only/` — main experiment
+
+See [`code/Morphology Only/help.md`](code/Morphology%20Only/help.md) for the full reference.
+
+---
+
+## Running an experiment
+
+```bash
+cd "code/Morphology Only"
+
+# Default config (mu_lambda, Gemini grader, crab_morph prompt)
+python experiment.py
+
+# Custom run
+python experiment.py --strategy map_elite --mu 10 --lambda_ 20 --n_gen 100
+
+# Resume an interrupted run
+python experiment.py --resume results/run_20260417_124808
 ```
 
 ---
 
 ## Dependencies
 
-| Package | Purpose |
-|---|---|
-| `mujoco` | Physics simulation and viewer |
-| `numpy` | Array operations throughout |
-
-Install with:
-```bash
-pip install mujoco numpy
 ```
-
-The viewer requires `mjpython` (bundled with the MuJoCo Python package on macOS):
-```bash
-pip install mujoco
+mujoco          # physics + renderer
+open_clip_torch # CLIP grader
+google-genai    # Gemini grader
+numpy
+Pillow
+matplotlib
+tkinter         # data analyser UI
 ```
 
 ---
 
-## How to run
+## Status
 
-```bash
-cd code/proto/Mujoco
-mjpython main_sim.py
-```
-
-> Use `mjpython` instead of `python` to get the MuJoCo viewer on macOS.
-> On Linux `python main_sim.py` works directly.
-
----
-
-## How to configure
-
-**`sim_config.py`** is the single file to edit between experiments.
-
-### Simulation
-
-| Parameter | Description |
-|---|---|
-| `N` | Number of robots simulated in parallel |
-| `SIMULATION_DURATION` | Duration in seconds |
-| `ROBOT_SPACING` | Distance between robots in the viewer (metres) |
-| `ROBOT_CONTROL` | `"external"` (neural net) or `"pre-configured"` (fixed sine gait) |
-
-### Display & recording
-
-| Parameter | Description |
-|---|---|
-| `VIEWER_ON` | Open the MuJoCo viewer window |
-| `VIDEO_RENDERER_ON` | Export one `.mp4` per robot to `Mujoco/render/` |
-| `SHOW_LIVE_POS_ON` | Print joint positions to the terminal each second |
-
-### Data & saves
-
-| Parameter | Description |
-|---|---|
-| `DATA_MODE` | `"Full"` (every step) or `"StartStop"` (first + last only) |
-| `SAVE_BEST` | Save the best robot to `Brain/saves/last_best.pkl` after each sim |
-| `UNIQUE_SAVE_BEST` | Also save a timestamped archive `best_YYYYMMDD_HHMMSS.pkl` |
-
-### Morphology
-
-Each robot's body is defined by a `RobotMorphology` descriptor — no static XML files. The simulation generates MuJoCo XML at runtime.
-
-```python
-MORPHOLOGIES = QUADRIPOD   # 4 legs at 0/90/180/270°
-MORPHOLOGIES = TRIPOD      # 3 legs at 0/120/240°
-MORPHOLOGIES = HEXAPOD     # 6 legs at 0/60/120/180/240/300°
-MORPHOLOGIES = [QUADRIPOD, TRIPOD, TRIPOD]  # heterogeneous population
-```
-
-Pre-built presets are imported from `Brain/morphology.py`. A custom morphology can be built from `RobotMorphology`, `LegDescriptor`, and `JointDescriptor` dataclasses.
-
-### Controller initialisation
-
-Controls what weights (and morphologies) each robot starts with:
-
-```python
-CONTROLLER_INIT = None
-# → all N robots start with fresh random weights + MORPHOLOGIES
-
-CONTROLLER_INIT = "last_best"
-# → all N robots are copies of the best robot from the previous simulation
-# → morphology is restored from the save file (MORPHOLOGIES is ignored)
-
-CONTROLLER_INIT = "last_sim"
-# → each robot i reloads its own weights from the previous simulation
-# → morphologies are restored from the save file (MORPHOLOGIES is ignored)
-
-CONTROLLER_INIT = {"source": "last_sim", "indices": [0, 4, 5, 6, 9]}
-# → robots 0,4,5,6,9 reload from last_sim, the rest start fresh
-
-CONTROLLER_INIT = {"source": "best_20260323_171407", "indices": "all"}
-# → load from a specific timestamped archive
-
-CONTROLLER_INIT = {
-    "source": "last_best",
-    "indices": "mutation",
-    "amplitude": 0.2,    # weight perturbation scale
-    "variation": 0.2,    # per-weight variation scale
-    "morphology": 0.1,   # morphological mutation amplitude (see below)
-}
-# → robot 0 is a copy of last_best; robots 1..N-1 are mutated clones
-# → if "morphology" is set, each mutated robot also gets a perturbed body
-```
-
----
-
-## Morphological mutation
-
-`MutateMorphology(morph, amplitude)` in `Brain/morphology.py` creates a modified copy of a morphology:
-
-- **Continuous**: each joint's `length` and `radius` are scaled by `1 + N(0, amplitude)`, clamped to safe bounds.
-- **Discrete** (probability ∝ amplitude): randomly add a leg (placed at the largest angular gap between existing legs) or remove a random leg (minimum 2 legs kept).
-
-When `CONTROLLER_INIT` uses `"indices": "mutation"` and a `"morphology"` key is present:
-- Robot 0 keeps the saved morphology unchanged.
-- Robots 1..N-1 each get an independently mutated body.
-- If the mutation changes the joint count, the robot gets a fresh randomly-initialised brain (instead of a mutated copy of robot 0's brain).
-
----
-
-## Neural network controller
-
-The default controller (`simple_brain.py`) is a fully-connected network with `tanh` activations.
-
-- **Inputs**: 3 clock signals `sin(ω·t)` at different frequencies + 2 × n_joints sensor values (angles + velocities) — automatically sized to the robot's morphology
-- **Outputs**: n_joints Δangle increments added to current hip angles each step — automatically sized
-- **Architecture**: configured via `NB_NEURONS_BY_LAYER` in `simple_brain.py`
-
-Weights are initialised with Xavier (`N(0, 1/√n_inputs)`). The `Mutate()` function creates a perturbed copy of a network for evolutionary search.
-
-### Save files (`Brain/saves/`)
-
-| File | Content |
-|---|---|
-| `last_sim.pkl` | All N networks + morphologies from the most recent simulation |
-| `last_best.pkl` | Best network + morphology from the most recent simulation (overwritten each sim) |
-| `best_YYYYMMDD_HHMMSS.pkl` | Timestamped archive of a best network + morphology |
-
-Save files include both the neural network weights and the robot morphology, so a brain can always be loaded back into its correct body.
-
-Load a save manually:
-```python
-from saver import load_controller
-payload = load_controller("last_best")
-networks     = payload["networks"]      # list[NeuralNetwork]
-morphologies = payload["morphologies"]  # list[RobotMorphology]
-context      = payload["context"]       # score, robot_index, …
-```
-
----
-
-## Performance metrics
-
-`DataManager` computes per-robot after each simulation:
-
-| Metric | Description |
-|---|---|
-| `displacement_xy` | XY distance travelled from start (metres) |
-| `avg_speed_xy` | Mean XY speed (m/s) — precise in `Full` mode |
-| `is_standing_end` | Whether the robot is still upright at the end |
-| `fell_at_time` | Time of first fall in seconds (`Full` mode only) |
-
-Results are printed automatically at the end of each simulation.
+| Component | Status |
+|-----------|--------|
+| Proto locomotion simulation | Done — functional baseline |
+| Morphology-only VLM scoring | Done — CLIP + Gemini, μ+λ+σ + MAP-Elites |
+| Genealogy tracking | Done — `individuals_log.jsonl`, `parent_id` chain |
+| Interactive data analyser | Done — `utils/data_analyser.py` |
+| Motion scoring (video → VLM) | In progress — proto VLM scripts exist |
+| Combined morphology + motion QD | Planned |

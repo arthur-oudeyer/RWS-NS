@@ -65,6 +65,8 @@ class MorphologyResult:
     grader_method : "cosine" or "softmax".
     prompt_set    : name of the PromptSet that was applied.
     render_path   : path to the saved PNG render, or None.
+    parent_id     : individual_id of the parent this was mutated from, or None
+                    for generation-0 individuals.
     """
     generation:    int
     individual_id: int
@@ -80,6 +82,7 @@ class MorphologyResult:
     # - CLIP  : {} (empty)
     # - Gemini: {"observation", "interpretation",
     #             "coherence_reason", "originality_reason", "interest_reason"}
+    parent_id:     Optional[int] = None
 
     def __str__(self) -> str:
         enc = self.descriptors
@@ -109,6 +112,7 @@ def result_to_dict(r: MorphologyResult) -> dict:
         "prompt_set":    r.prompt_set,
         "render_path":   r.render_path,
         "grader_extra":  r.grader_extra,
+        "parent_id":     r.parent_id,
     }
 
 
@@ -124,6 +128,7 @@ def dict_to_result(d: dict) -> MorphologyResult:
         prompt_set    = d["prompt_set"],
         render_path   = d.get("render_path"),
         grader_extra  = d.get("grader_extra", {}),
+        parent_id     = d.get("parent_id"),
     )
 
 
@@ -138,6 +143,7 @@ def evaluate(
     generation:       int,
     individual_id:    int,
     render_save_path: Optional[str] = None,
+    parent_id:        Optional[int] = None,
     debug:            bool = False,
 ) -> MorphologyResult:
     """
@@ -181,6 +187,7 @@ def evaluate(
         prompt_set    = grader_output.prompt_set,
         render_path   = render_save_path,
         grader_extra  = grader_output.extra,
+        parent_id     = parent_id,
     )
 
 
