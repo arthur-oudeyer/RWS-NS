@@ -18,6 +18,7 @@ from tkinter import ttk, filedialog, messagebox
 from typing import Optional
 
 import matplotlib
+import matplotlib.patches
 matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
@@ -25,8 +26,8 @@ from matplotlib.figure import Figure
 # ── Quick config ───────────────────────────────────────────────────────────────
 DEFAULT_RUN_DIR  = None           # None = auto-select most-recent run on startup
                                   # or set to e.g. "run_20260417_151235"
-DEFAULT_GRAPH_1  = "Best Fitness × Generation"
-DEFAULT_GRAPH_2  = "Score Details (Best) × Generation"
+DEFAULT_GRAPH_1  = "Map-Elites Grid Coverage"
+DEFAULT_GRAPH_2  = "Individual Render"
 WINDOW_TITLE     = "Morphology Evolution Analyser"
 WINDOW_GEOMETRY  = "1400x860"
 FONT_MONO        = ("Courier", 14)
@@ -46,6 +47,7 @@ GRAPH_OPTIONS = [
     "Genealogy Path",
     "Individual Render",
     "Individual Descriptors",
+    "Map-Elites Grid Coverage",
 ]
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -83,7 +85,8 @@ def load_run(run_dir: Path) -> dict:
     if cfg_path.exists():
         data["config"] = json.loads(cfg_path.read_text(encoding="utf-8"))
 
-    data["log"] = _read_jsonl(run_dir / "log.jsonl")
+    data["log"]  = _read_jsonl(run_dir / "log.jsonl")
+    data["grid"] = {}
 
     arc_path = run_dir / "archive_final.json"
     if not arc_path.exists():
@@ -95,8 +98,14 @@ def load_run(run_dir: Path) -> dict:
         data["history"] = arc.get("history", [])
         if "population" in arc and arc["population"] is not None:
             data["population"] = arc["population"]
+            data["grid"] = {}
         elif "grid" in arc:
             data["population"] = list(arc["grid"].values())
+            data["grid"] = arc["grid"]  # raw {key_str: individual_dict}
+            # feature_dims stored in the archive itself (set by MapEliteArchive)
+            if "feature_dims" in arc:
+                data["config"].setdefault("map_elite_feature_dims",
+                                          arc["feature_dims"])
 
     # all_individuals: prefer streaming log (has genealogy), fall back to population
     indiv_records = _read_jsonl(run_dir / "individuals_log.jsonl")
@@ -126,11 +135,19 @@ def _find_render(run_dir: Path, individual: dict) -> Optional[Path]:
         if c.exists():
             return c
 
-    # Broad search
+    # Broad search inside run renders
     renders_dir = run_dir / "renders"
     if renders_dir.exists():
         for found in renders_dir.rglob(f"*id{iid:06d}.png"):
             return found
+
+    # Fallback: last_render temp folder (sibling of run_dir, reset each experiment)
+    last_render = run_dir.parent / "last_render"
+    if last_render.exists():
+        candidate = last_render / f"id{iid:06d}.png"
+        if candidate.exists():
+            return candidate
+
     return None
 
 
@@ -345,6 +362,101 @@ def draw_descriptors(ax, run_data: dict, sel_id) -> None:
     ax.grid(True, axis="x", alpha=0.3)
 
 
+def draw_grid_coverage(ax, run_data: dict, sel_id) -> None:
+    grid_raw = run_data.get("grid", {})
+    if not grid_raw:
+        return _no_data(ax, "No Map-Elites grid found.\n(Only available for map_elite strategy runs.)")
+
+    def _parse_key(s):
+        s = s.strip()
+        if s.startswith("["):
+            return tuple(json.loads(s))
+        return tuple(int(x) for x in s.strip("()").split(","))
+
+    parsed = {}
+    for k, v in grid_raw.items():
+        try:
+            parsed[_parse_key(k)] = v
+        except Exception:
+            pass
+
+    if not parsed:
+        return _no_data(ax, "Grid keys could not be parsed.")
+
+    keys  = list(parsed.keys())
+    xs    = sorted(set(k[0] for k in keys))
+    ys    = sorted(set(k[1] for k in keys))
+    x_min, x_max = min(xs), max(xs)
+    y_min, y_max = min(ys), max(ys)
+    nx = x_max - x_min + 1
+    ny = y_max - y_min + 1
+
+    import numpy as _np
+    from matplotlib.colors import LinearSegmentedColormap
+
+    grid_fit  = _np.full((ny, nx), _np.nan)
+    # cell_to_id maps (col, row) in imshow coords → individual_id
+    cell_to_id = {}
+    for (xi, yi), indiv in parsed.items():
+        col = xi - x_min   # x axis = col
+        row = yi - y_min   # y axis = row
+        if 0 <= row < ny and 0 <= col < nx:
+            grid_fit[row, col] = indiv.get("fitness", _np.nan)
+            cell_to_id[(col, row)] = indiv.get("individual_id")
+
+    # 2-color map: red (low) → green (high); NaN shown as near-black
+    rg_cmap = LinearSegmentedColormap.from_list("rg", ["#CC2222", "#22AA44"])
+    rg_cmap.set_bad(color="#1A1A1A")
+
+    im = ax.imshow(
+        grid_fit, origin="lower", aspect="auto",
+        cmap=rg_cmap, interpolation="nearest",
+    )
+    ax.figure.colorbar(im, ax=ax, label="Fitness", pad=0.02)
+
+    # Cell annotations: fitness + id
+    for (xi, yi), indiv in parsed.items():
+        col = xi - x_min
+        row = yi - y_min
+        fit = indiv.get("fitness", 0)
+        iid = indiv.get("individual_id", "?")
+        ax.text(col, row + 0.1,    f"{fit:.3f}", ha="center", va="center",
+                fontsize=10, color="white", fontweight="bold")
+        ax.text(col, row - 0.15, f"id={iid}", ha="center", va="center",
+                fontsize=10, color="#DDDDDD")
+
+    # Blue border around the selected individual's cell
+    if sel_id is not None:
+        for (xi, yi), indiv in parsed.items():
+            if indiv.get("individual_id") == sel_id:
+                col = xi - x_min
+                row = yi - y_min
+                ax.add_patch(matplotlib.patches.Rectangle(
+                    (col - 0.5, row - 0.5), 1, 1,
+                    fill=False, edgecolor="#4488FF", lw=2.5, zorder=5,
+                ))
+
+    cfg   = run_data.get("config", {})
+    dims  = cfg.get("map_elite_feature_dims") or ["dim0", "dim1"]
+    dim_x = dims[0] if len(dims) > 0 else "dim0"
+    dim_y = dims[1] if len(dims) > 1 else "dim1"
+
+    ax.set_xticks(range(nx))
+    ax.set_xticklabels([str(x_min + i) for i in range(nx)], fontsize=7)
+    ax.set_yticks(range(ny))
+    ax.set_yticklabels([str(y_min + i) for i in range(ny)], fontsize=7)
+    ax.set_xlabel(dim_x.replace("_", " "), fontsize=9)
+    ax.set_ylabel(dim_y.replace("_", " "), fontsize=9)
+    ax.set_title(
+        f"Map-Elites Grid  —  {len(parsed)} / {nx * ny} cells filled", fontsize=10
+    )
+
+    # Store cell map on the axes for the click handler (registered in _refresh_graph)
+    ax._grid_cell_to_id   = cell_to_id
+    ax._grid_x_min        = x_min
+    ax._grid_y_min        = y_min
+
+
 GRAPH_RENDERERS: dict = {
     "Best Fitness × Generation":        draw_best_fitness,
     "Mean Fitness ± Std × Generation":  draw_mean_fitness,
@@ -353,11 +465,12 @@ GRAPH_RENDERERS: dict = {
     "Genealogy Path":                   draw_genealogy,
     "Individual Render":                draw_render,
     "Individual Descriptors":           draw_descriptors,
+    "Map-Elites Grid Coverage":         draw_grid_coverage,
 }
 
 # graphs that need a refresh when the selected individual changes
 _INDIVIDUAL_GRAPHS = {"Genealogy Path", "Individual Render", "Individual Descriptors",
-                      "All Fitnesses (scatter)"}
+                      "All Fitnesses (scatter)", "Map-Elites Grid Coverage"}
 
 
 # ── Text panel helpers ─────────────────────────────────────────────────────────
@@ -741,6 +854,22 @@ class DataAnalyser:
                 fn(ax, self._run_data, self._selected_id)
             except Exception as exc:
                 _no_data(ax, f"Render error:\n{exc}")
+
+        # Grid click-to-select: register handler if the renderer stored a cell map
+        if hasattr(ax, "_grid_cell_to_id") and ax._grid_cell_to_id:
+            cell_map = ax._grid_cell_to_id
+
+            def _on_grid_click(event, _ax=ax, _cvs=cvs, _cell=cell_map):
+                if event.inaxes != _ax or event.xdata is None:
+                    return
+                col = int(round(event.xdata))
+                row = int(round(event.ydata))
+                iid = _cell.get((col, row))
+                if iid is not None and iid in self._indiv_list:
+                    self._select_individual(iid)
+
+            cvs.mpl_connect("button_press_event", _on_grid_click)
+
         cvs.draw()
 
     # ── Individual navigation ──────────────────────────────────────────────────

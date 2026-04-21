@@ -192,6 +192,95 @@ def evaluate(
 
 
 # ---------------------------------------------------------------------------
+# evaluate_batch()
+# ---------------------------------------------------------------------------
+
+def evaluate_batch(
+    morphs:            list[RobotMorphology],
+    renderer,
+    grader,
+    generation:        int,
+    id_counter:        int,
+    render_save_paths: Optional[list] = None,
+    parent_ids:        Optional[list] = None,
+    debug:             bool = False,
+) -> tuple[list[MorphologyResult], int]:
+    """
+    Evaluate a list of morphologies, batching the grading step.
+
+    Renders all morphologies individually, then calls grader.score_batch()
+    in one shot (GeminiGrader sends all images in a single API call;
+    CLIPGrader falls back to a loop via the base-class default).
+
+    Parameters
+    ----------
+    morphs            : list of morphologies to evaluate.
+    renderer          : MorphologyRenderer instance.
+    grader            : MorphologyGrader instance.
+    generation        : current generation index.
+    id_counter        : first individual_id to assign; incremented per morph.
+    render_save_paths : pre-computed save paths (one per morph, or None entries).
+                        If None, no PNGs are saved.
+    parent_ids        : parent individual_id per morph, or None entries.
+    debug             : passed through to grader.
+
+    Returns
+    -------
+    (results, new_id_counter)
+    """
+    n = len(morphs)
+    ids = list(range(id_counter, id_counter + n))
+    if render_save_paths is None:
+        render_save_paths = [None] * n
+    if parent_ids is None:
+        parent_ids = [None] * n
+    # Defensive: pad to n if caller passed a shorter list
+    if len(render_save_paths) < n:
+        render_save_paths = list(render_save_paths) + [None] * (n - len(render_save_paths))
+    if len(parent_ids) < n:
+        parent_ids = list(parent_ids) + [None] * (n - len(parent_ids))
+
+    # Render all images
+    labeled_images = []
+    for i, morph in enumerate(morphs):
+        image = renderer.render(morph, save_path=render_save_paths[i], debug=debug)
+        labeled_images.append((f"robot_{ids[i]}", image))
+
+    # Grade all images in one batch call
+    grader_outputs = grader.score_batch(labeled_images, debug=debug)
+
+    # Assemble results
+    results = []
+    for i, morph in enumerate(morphs):
+        key = f"robot_{ids[i]}"
+        go = grader_outputs.get(key)
+        if go is None:
+            # Grader dropped this robot (parse failure); fall back to zero fitness
+            print(f"[evaluate_batch] WARNING: no grader output for {key}, skipping.")
+            continue
+        # Merge structural descriptors with any VLM-assessed descriptors.
+        # VLM descriptors override structural ones if names collide.
+        structural = morph.encoding()
+        vlm_desc   = go.extra.get("vlm_descriptors", {})
+        descriptors = {**structural, **vlm_desc}
+        results.append(MorphologyResult(
+            generation    = generation,
+            individual_id = ids[i],
+            morphology    = morph,
+            fitness       = go.fitness,
+            raw_scores    = go.raw_scores,
+            descriptors   = descriptors,
+            grader_method = go.method,
+            prompt_set    = go.prompt_set,
+            render_path   = render_save_paths[i],
+            grader_extra  = go.extra,
+            parent_id     = parent_ids[i],
+        ))
+
+    return results, id_counter + n
+
+
+# ---------------------------------------------------------------------------
 # Debug
 # ---------------------------------------------------------------------------
 

@@ -43,10 +43,10 @@ def _load_population(archive_path: Path) -> list[dict]:
     with open(archive_path) as f:
         data = json.load(f)
 
-    # Both MuLambdaArchive and MapEliteArchive store entries under "population"
-    if isinstance(data, dict) and "population" in data:
+    if isinstance(data, dict) and "population" in data and data["population"] is not None:
         return data["population"]
-    # Fallback: bare list (old format)
+    if isinstance(data, dict) and "grid" in data:
+        return list(data["grid"].values())
     if isinstance(data, list):
         return data
     raise ValueError(f"Unrecognised archive format in {archive_path}")

@@ -73,21 +73,30 @@ class ExperimentConfig:
 
     # ---- Identity -----------------------------------------------------------
     run_id:          str = ""            # filled automatically if empty
-    seed:            int = 42
+    seed:            int = 67
     description:     str = ""
-    strategy:        str = "mu_lambda"   # "mu_lambda" | "map_elite"
+    strategy:        str = "map_elite"   # "mu_lambda" | "map_elite"
 
     # ---- Population ---------------------------------------------------------
-    mu:              int = 5            # number of parents kept each generation
-    lambda_:         int = 10           # number of offspring produced each generation from the mu best parents
-    sigma:           int = 5            # number of fresh random morphologies injected each generation
+    mu:              int = 4            # number of parents kept each generation
+    lambda_:         int = 18           # number of offspring produced each generation by mutating the previous generation
+    sigma:           int = 2            # number of fresh random morphologies injected each generation
     n_generations:   int = 10
 
-    # Time estimation : 10,3s * (mu + lambda + sigma) * n_generations
+    # Time estimation single call : 10 s * number of robot * generations
+    # Time estimation batch call  : 6 s * number of robot * generations
 
     # ---- Initial population -------------------------------------------------
-    init_n_legs_min: int = 2
-    init_n_legs_max: int = 6
+    # init_population_size : number of random individuals evaluated at gen 0.
+    #   mu_lambda  → defaults to mu  if 0
+    #   map_elite  → defaults to max(mu, lambda_) * 2  if 0
+    init_population_size: int = lambda_ + sigma
+
+    # Range of leg count for randomly generated morphologies (structure, not count)
+    init_n_legs_min: int = 1
+    init_n_legs_max: int = 7
+
+    # Number of random mutations made initially to each base individual
     init_n_mutation: int = 5
 
     # ---- Mutation -----------------------------------------------------------
@@ -126,12 +135,17 @@ class ExperimentConfig:
     scoring_method:  str = "cosine"       # "cosine" | "softmax"
 
     # Gemini 3.1 Flash-Lite -> gemini-3.1-flash-lite-preview    ~8s/image
-    # Gemini 3 Flash        -> gemini-3-flash-preview           ~10s/image
+    # Gemini 3 Flash        -> gemini-3-flash-preview           ~10s/image (batch -> ~5s/imag)
     # Gemini 3.1 Pro        -> gemini-3.1-pro-preview           ~15s/image
     gemini_model:    str = "gemini-3-flash-preview"
+    batching:        int = 10
 
     # ---- Prompt -------------------------------------------------------------
-    prompt_name:     str = "goal_keeper_morph"
+    prompt_name:     str = "centipede_morph"
+
+    # ---- Descriptor (VLM-based MapElite feature assessment) -----------------
+    # Name of a DescriptorConfig from descriptor.py; "" = structural-only mode.
+    descriptor_config_name: str = "generic_descriptors"
 
     # ---- Output -------------------------------------------------------------
     output_dir:            str  = "results"
@@ -143,12 +157,7 @@ class ExperimentConfig:
     #                         Saved to renders/best_final.png
     save_best_every_n_gen: int  = 1     # 0 to disable
     save_final_best:       bool = True
-
-    # ---- MapElite -----------------------------------------------------------
-    # Bin edges for the symmetry_score feature dimension.
-    # Produces len(symmetry_bins)+1 buckets:
-    #   [0, 0.5) → asymmetric | [0.5, 0.8) → semi-sym | [0.8, 1] → symmetric
-    symmetry_bins: list = field(default_factory=lambda: [0.5, 0.8])
+    save_all_render_tmp:   bool = True # save all render temporarily for data analysis
 
     # -------------------------------------------------------------------------
 
@@ -196,7 +205,7 @@ class ExperimentConfig:
         if self.strategy == "mu_lambda":
             print(f"  population   : μ={self.mu}  λ={self.lambda_}  generations={self.n_generations}")
         elif self.strategy == "map_elite":
-            print(f"  population   : μ={self.mu}  λ={self.lambda_}  generations={self.n_generations}")
+            print(f"  population   : λ={self.lambda_}  generations={self.n_generations}, descriptor={self.descriptor_config_name}")
         print(f"  init legs    : [{self.init_n_legs_min}, {self.init_n_legs_max}]")
         print(f"  mutation     : length_std={self.length_std}  angle_std={self.angle_std}  "
               f"rest_angle_std={self.rest_angle_std}")

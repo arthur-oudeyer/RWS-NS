@@ -224,51 +224,87 @@ class MuLambdaArchive:
 
 class MapEliteArchive:
     """
-    MAP-Elites grid archive.
+    MAP-Elites grid archive with configurable feature dimensions.
 
-    Feature space (two dimensions):
-      Axis 0 — n_legs       : discrete integer (from descriptors)
-      Axis 1 — symmetry_bin : integer bucket for symmetry_score
-
-    symmetry_bins defines the bin edges for axis 1.
-    Default [0.5, 0.8] produces 3 buckets:
-      0 = [0.0, 0.5)  asymmetric
-      1 = [0.5, 0.8)  semi-symmetric
-      2 = [0.8, 1.0]  symmetric
+    Feature space: two dimensions taken from MorphologyResult.descriptors.
+    Each dimension is either discrete (integer used as-is) or binned
+    (float value mapped to a bucket index via provided bin edges).
 
     Parameters
     ----------
-    symmetry_bins : list of float bin edges.
+    feature_dims : list of two descriptor key names, e.g.
+                   ["n_legs", "bilateral_symmetry"].
+                   The values are read from result.descriptors at update time.
+    feature_bins : dict mapping dim name → list of float bin edges.
+                   Dims NOT present here are treated as discrete integers.
+                   E.g. {"bilateral_symmetry": [4.0, 7.0]} produces 3 buckets.
+    dim_labels   : optional dict mapping dim name → list of bucket labels
+                   (one per bucket, for display only).
+
+    Legacy parameter
+    ----------------
+    symmetry_bins : kept for backward-compat when loading old JSON files.
+                    Ignored when feature_dims is provided explicitly.
     """
 
-    SYMMETRY_BIN_LABELS = ["asymmetric", "semi-sym", "symmetric"]
+    def __init__(
+        self,
+        feature_dims: list[str]             = None,
+        feature_bins: dict[str, list[float]] = None,
+        dim_labels:   dict[str, list[str]]   = None,
+        symmetry_bins: list[float]           = None,  # legacy
+    ):
+        # Legacy fallback: reproduce old (n_legs, symmetry_score) behaviour
+        if feature_dims is None:
+            bins = symmetry_bins or [0.5, 0.8]
+            feature_dims = ["n_legs", "symmetry_score"]
+            feature_bins = feature_bins or {"symmetry_score": bins}
+            dim_labels   = dim_labels or {
+                "symmetry_score": ["asymmetric", "semi-sym", "symmetric"]
+            }
 
-    def __init__(self, symmetry_bins: list[float] = None):
-        self.symmetry_bins: list[float]               = symmetry_bins or [0.5, 0.8]
-        self.grid:          dict[tuple, MorphologyResult] = {}
-        self.history:       list[GenerationStats]          = []
+        self.feature_dims: list[str]              = feature_dims
+        self.feature_bins: dict[str, list[float]] = feature_bins or {}
+        self.dim_labels:   dict[str, list[str]]   = dim_labels   or {}
+        self.grid:         dict[tuple, MorphologyResult] = {}
+        self.history:      list[GenerationStats]         = []
 
     # ---- Feature key -------------------------------------------------------
 
-    def _symmetry_bin(self, score: float) -> int:
-        for i, edge in enumerate(self.symmetry_bins):
-            if score < edge:
+    def _bin(self, value: float, edges: list[float]) -> int:
+        for i, edge in enumerate(edges):
+            if value < edge:
                 return i
-        return len(self.symmetry_bins)
+        return len(edges)
 
     def feature_key(self, result: MorphologyResult) -> tuple:
-        """Map a result to its (n_legs, symmetry_bin) cell key."""
-        n_legs  = int(result.descriptors["n_legs"])
-        sym_bin = self._symmetry_bin(result.descriptors["symmetry_score"])
-        return (n_legs, sym_bin)
+        """Map a result to its N-dimensional cell key."""
+        key = []
+        for dim in self.feature_dims:
+            val = result.descriptors.get(dim)
+            if val is None:
+                raise KeyError(
+                    f"[MapEliteArchive] Descriptor '{dim}' missing in result "
+                    f"id={result.individual_id}. "
+                    f"Available keys: {list(result.descriptors.keys())}"
+                )
+            edges = self.feature_bins.get(dim, [])
+            if edges:
+                key.append(self._bin(float(val), edges))
+            else:
+                key.append(int(val))
+        return tuple(key)
 
     def feature_label(self, key: tuple) -> str:
-        """Human-readable cell label, e.g. '4legs/symmetric'."""
-        n_legs, sym_bin = key
-        label = (self.SYMMETRY_BIN_LABELS[sym_bin]
-                 if sym_bin < len(self.SYMMETRY_BIN_LABELS)
-                 else str(sym_bin))
-        return f"{n_legs}legs/{label}"
+        """Human-readable cell label, e.g. 'n_legs=4 / bilateral_symmetry=symmetric'."""
+        parts = []
+        for dim, bucket in zip(self.feature_dims, key):
+            labels = self.dim_labels.get(dim, [])
+            if labels and bucket < len(labels):
+                parts.append(f"{dim}={labels[bucket]}")
+            else:
+                parts.append(f"{dim}={bucket}")
+        return " / ".join(parts)
 
     # ---- Core operations ---------------------------------------------------
 
@@ -277,18 +313,36 @@ class MapEliteArchive:
         Insert each result into the grid.
         A cell is updated only when the new individual's fitness is
         strictly higher than the current occupant.
-        Records generation statistics over the given results.
+        Records generation statistics: best/id from the full grid (monotonically
+        non-decreasing), mean/std from the evaluated batch only.
         """
         if not results:
             return
 
         generation = results[0].generation
-        self.history.append(_make_stats(generation, results))
 
+        # Update grid first so stats reflect the post-update state
         for r in results:
-            key = self.feature_key(r)
+            try:
+                key = self.feature_key(r)
+            except KeyError:
+                continue
             if key not in self.grid or r.fitness > self.grid[key].fitness:
                 self.grid[key] = r
+
+        # Best fitness = grid-wide best (never decreases)
+        grid_best = max(self.grid.values(), key=lambda r: r.fitness) if self.grid else results[0]
+        import statistics as _stats
+        fitnesses = [r.fitness for r in results]
+        self.history.append(GenerationStats(
+            generation         = generation,
+            n_evaluated        = len(results),
+            best_fitness       = grid_best.fitness,
+            mean_fitness       = _stats.mean(fitnesses),
+            std_fitness        = _stats.stdev(fitnesses) if len(fitnesses) > 1 else 0.0,
+            best_individual_id = grid_best.individual_id,
+            best_raw_scores    = grid_best.raw_scores,
+        ))
 
     def best(self) -> Optional[MorphologyResult]:
         """Individual with the highest fitness across all grid cells."""
@@ -321,7 +375,7 @@ class MapEliteArchive:
     # ---- Summary -----------------------------------------------------------
 
     def summary(self) -> None:
-        print(f"\n── MapEliteArchive  bins={self.symmetry_bins} ──")
+        print(f"\n── MapEliteArchive  dims={self.feature_dims} ──")
         print(f"  Filled cells : {len(self.grid)}")
         b = self.best()
         if b:
@@ -330,7 +384,7 @@ class MapEliteArchive:
         print(f"  Grid contents:")
         for key in sorted(self.grid):
             r = self.grid[key]
-            print(f"    {self.feature_label(key):<22}  fitness={r.fitness:+.5f}  "
+            print(f"    {self.feature_label(key):<40}  fitness={r.fitness:+.5f}  "
                   f"id={r.individual_id}")
         if self.history:
             print(f"  Last gen : {self.history[-1]}")
@@ -345,18 +399,37 @@ class MapEliteArchive:
 
     def to_dict(self) -> dict:
         return {
-            "type":          "map_elite",
-            "symmetry_bins": self.symmetry_bins,
-            "grid":          {str(k): result_to_dict(v) for k, v in self.grid.items()},
-            "history":       [asdict(s) for s in self.history],
+            "type":         "map_elite",
+            "feature_dims": self.feature_dims,
+            "feature_bins": self.feature_bins,
+            "dim_labels":   self.dim_labels,
+            # Grid keys as JSON arrays: "[4, 1]" — unambiguous and parseable
+            "grid":    {json.dumps(list(k)): result_to_dict(v) for k, v in self.grid.items()},
+            "history": [asdict(s) for s in self.history],
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> MapEliteArchive:
-        archive = cls(symmetry_bins=d["symmetry_bins"])
+        # New format: feature_dims present
+        if "feature_dims" in d:
+            archive = cls(
+                feature_dims = d["feature_dims"],
+                feature_bins = d.get("feature_bins", {}),
+                dim_labels   = d.get("dim_labels", {}),
+            )
+        else:
+            # Legacy format: symmetry_bins only
+            archive = cls(symmetry_bins=d.get("symmetry_bins", [0.5, 0.8]))
+
         for k_str, v in d["grid"].items():
-            key = tuple(int(x) for x in k_str.strip("()").split(", "))
+            # New format: "[4, 1]"
+            if k_str.startswith("["):
+                key = tuple(json.loads(k_str))
+            else:
+                # Legacy format: "(4, 1)"
+                key = tuple(int(x) for x in k_str.strip("()").split(", "))
             archive.grid[key] = dict_to_result(v)
+
         archive.history = [
             GenerationStats(
                 generation         = s["generation"],

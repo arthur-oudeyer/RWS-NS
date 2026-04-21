@@ -200,6 +200,13 @@ CRAB_MORPH = GeminiPromptConfig(
     weights = GeminiScoringWeights(coherence=1.0, originality=0.5, interest=1.5),
 )
 
+CENTIPEDE_MORPH = GeminiPromptConfig(
+    name    = "centipede_morph",
+    target  = "centipede",
+    prompt  = build_morphology_prompt("centipede", "move forward continuously like a long insect (centipede, caterpillar..)"),
+    weights = GeminiScoringWeights(coherence=1.0, originality=0.5, interest=1.5),
+)
+
 KANGAROO_MORPH = GeminiPromptConfig(
     name    = "kangaroo_morph",
     target  = "kangaroo",
@@ -221,7 +228,7 @@ GOALKEEPER_MORPH = GeminiPromptConfig(
 
 ALL_GEMINI_PROMPT_CONFIGS: dict[str, GeminiPromptConfig] = {
     cfg.name: cfg
-    for cfg in (INSECT_MORPH, SPIDER_MORPH, CRAB_MORPH, KANGAROO_MORPH, GOALKEEPER_MORPH)
+    for cfg in (INSECT_MORPH, SPIDER_MORPH, CRAB_MORPH, KANGAROO_MORPH, GOALKEEPER_MORPH, CENTIPEDE_MORPH)
 }
 
 

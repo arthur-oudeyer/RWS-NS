@@ -56,7 +56,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 from morphology   import RobotMorphology, NewMorph, MutateMorphology
-from data_handler import MorphologyResult, evaluate
+from data_handler import MorphologyResult, evaluate, evaluate_batch
 from archive      import MuLambdaArchive, MapEliteArchive
 from config       import ExperimentConfig
 
@@ -78,6 +78,11 @@ class BaseEvolution(ABC):
     def __init__(self, cfg: ExperimentConfig, rng: Optional[np.random.Generator] = None):
         self.cfg = cfg
         self.rng = rng if rng is not None else np.random.default_rng(cfg.seed)
+        self._tmp_render_dir = (
+            str(Path(cfg.output_dir) / "last_render")
+            if getattr(cfg, "save_all_render_tmp", False)
+            else None
+        )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -118,29 +123,55 @@ class BaseEvolution(ABC):
         """
         Evaluate a list of morphologies and return (results, new_id_counter).
 
-        If save_renders is True and render_dir is given, saves rendered PNGs.
-        parent_ids, if provided, maps each morph to its parent's individual_id.
-        """
-        results = []
-        for i, morph in enumerate(morphs):
-            if save_renders and render_dir:
-                Path(render_dir).mkdir(parents=True, exist_ok=True)
-                render_path = str(Path(render_dir) / f"gen{generation:04d}_id{id_counter:06d}.png")
-            else:
-                render_path = None
+        Pre-computes render paths, then delegates to evaluate_batch() which
+        calls grader.score_batch() — one API call for all images when using
+        GeminiGrader, or a loop for CLIPGrader.
 
-            r = evaluate(
-                morph            = morph,
-                renderer         = renderer,
-                grader           = grader,
-                generation       = generation,
-                individual_id    = id_counter,
-                render_save_path = render_path,
-                parent_id        = parent_ids[i] if parent_ids else None,
-            )
-            results.append(r)
-            id_counter += 1
-        return results, id_counter
+        When cfg.save_all_render_tmp is True, renders are saved to last_render/
+        and that path is stored in the result record (used by data_analyser).
+        If save_renders is also True, the renders are additionally copied to
+        the per-generation directory.
+        """
+        import shutil
+
+        n = len(morphs)
+
+        # Determine primary render paths (stored in result records)
+        if self._tmp_render_dir:
+            Path(self._tmp_render_dir).mkdir(parents=True, exist_ok=True)
+            render_paths = [
+                str(Path(self._tmp_render_dir) / f"id{id_counter + i:06d}.png")
+                for i in range(n)
+            ]
+        elif save_renders and render_dir:
+            Path(render_dir).mkdir(parents=True, exist_ok=True)
+            render_paths = [
+                str(Path(render_dir) / f"gen{generation:04d}_id{id_counter + i:06d}.png")
+                for i in range(n)
+            ]
+        else:
+            render_paths = None
+
+        results, new_id_counter = evaluate_batch(
+            morphs=morphs,
+            renderer=renderer,
+            grader=grader,
+            generation=generation,
+            id_counter=id_counter,
+            render_save_paths=render_paths,
+            parent_ids=parent_ids,
+        )
+
+        # When both tmp and gen dirs are active, copy renders to gen dir too
+        if self._tmp_render_dir and save_renders and render_dir and render_paths:
+            Path(render_dir).mkdir(parents=True, exist_ok=True)
+            for i, rp in enumerate(render_paths):
+                src = Path(rp)
+                dst = Path(render_dir) / f"gen{generation:04d}_id{id_counter + i:06d}.png"
+                if src.exists():
+                    shutil.copy2(src, dst)
+
+        return results, new_id_counter
 
     def _random_population(self, size: int) -> list[RobotMorphology]:
         """Generate `size` random morphologies using config leg range."""
@@ -223,8 +254,8 @@ class MuLambdaEvolution(BaseEvolution):
         save_renders: bool = False,
         render_dir:   Optional[str] = None,
     ) -> tuple[list[MorphologyResult], int]:
-
-        morphs = self._random_population(self.cfg.mu)
+        size = getattr(self.cfg, "init_population_size", 0) or self.cfg.mu
+        morphs = self._random_population(size)
         return self._evaluate_batch(morphs, renderer, grader,
                                     generation=0,
                                     id_counter=id_counter,
@@ -320,10 +351,8 @@ class MapEliteEvolution(BaseEvolution):
         self,
         cfg:       ExperimentConfig,
         rng:       Optional[np.random.Generator] = None,
-        init_size: Optional[int] = None,
     ):
         super().__init__(cfg, rng)
-        self.init_size = init_size if init_size is not None else max(cfg.mu, cfg.lambda_) * 2
 
     def initialise(
         self,
@@ -333,7 +362,8 @@ class MapEliteEvolution(BaseEvolution):
         save_renders: bool = False,
         render_dir:   Optional[str] = None,
     ) -> tuple[list[MorphologyResult], int]:
-        morphs = self._random_population(self.init_size)
+        size = getattr(self.cfg, "init_population_size", 0) or max(self.cfg.mu, self.cfg.lambda_) * 2
+        morphs = self._random_population(size)
         return self._evaluate_batch(morphs, renderer, grader,
                                     generation=0,
                                     id_counter=id_counter,
@@ -354,8 +384,8 @@ class MapEliteEvolution(BaseEvolution):
         sampled_parents = archive.get_parent_results(self.cfg.lambda_)
         parent_ids      = [r.individual_id for r in sampled_parents]
 
-        # 2. Mutate → λ offspring morphologies
-        offspring_morphs = [self._mutate_one(r.morphology) for r in sampled_parents]
+        # 2. Mutate → λ offspring morphologies + 𝞂 brand-new morphology
+        offspring_morphs = [self._mutate_one(r.morphology) for r in sampled_parents] + self._random_population(self.cfg.sigma)
 
         # 3. Evaluate offspring only (MAP-Elites never re-evaluates incumbents)
         return self._evaluate_batch(

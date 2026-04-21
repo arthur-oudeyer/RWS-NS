@@ -191,6 +191,24 @@ class MorphologyGrader(ABC):
         """
         ...
 
+    def score_batch(
+        self,
+        images: "list[tuple[str, PILImage.Image]]",
+        debug: Optional[bool] = None,
+    ) -> "dict[str, GraderOutput]":
+        """
+        Score multiple images, returning a dict keyed by robot_id.
+
+        Default implementation calls score() in a loop.
+        GeminiGrader overrides this to send all images in one API call.
+
+        Parameters
+        ----------
+        images : list of (robot_id, PIL Image) pairs.
+        debug  : overrides self.debug for this call if not None.
+        """
+        return {robot_id: self.score(img, debug=debug) for robot_id, img in images}
+
 
 # ---------------------------------------------------------------------------
 # CLIPGrader
@@ -362,6 +380,13 @@ try:
 except ImportError:
     _GEMINI_AVAILABLE = False
 
+try:
+    from descriptor import DescriptorConfig as _DescriptorConfig
+    from descriptor import build_descriptor_prompt_section as _build_desc_section
+    _DESCRIPTOR_AVAILABLE = True
+except ImportError:
+    _DESCRIPTOR_AVAILABLE = False
+
 
 class GeminiGrader(MorphologyGrader):
     """
@@ -373,10 +398,14 @@ class GeminiGrader(MorphologyGrader):
 
     Parameters
     ----------
-    api_key       : Gemini API key.
-    prompt_config : GeminiPromptConfig (from gemini_prompts.py).
-    model_name    : Gemini model ID.  Defaults to "gemini-2.0-flash".
-    debug         : global debug flag.
+    api_key           : Gemini API key.
+    prompt_config     : GeminiPromptConfig (from gemini_prompts.py).
+    model_name        : Gemini model ID.
+    batch_size        : max images per batch call (default 10).
+    descriptor_config : optional DescriptorConfig (from descriptor.py).
+                        When set, the VLM also rates each descriptor item
+                        and the scores are stored in extra["vlm_descriptors"].
+    debug             : global debug flag.
 
     Fitness
     -------
@@ -388,10 +417,12 @@ class GeminiGrader(MorphologyGrader):
 
     def __init__(
         self,
-        api_key:       str,
-        prompt_config: "GeminiPromptConfig",  # noqa: F821 — imported lazily below
-        model_name:    str  = "gemini-3-flash-preview",
-        debug:         bool = False,
+        api_key:           str,
+        prompt_config:     "GeminiPromptConfig",  # noqa: F821
+        model_name:        str  = "gemini-3-flash-preview",
+        batch_size:        int  = 10,
+        descriptor_config: "Optional[_DescriptorConfig]" = None,
+        debug:             bool = False,
     ):
         if not _GEMINI_AVAILABLE:
             raise ImportError(
@@ -408,17 +439,255 @@ class GeminiGrader(MorphologyGrader):
         Gemini 3 Flash        -> gemini-3-flash-preview
         Gemini 3.1 Pro        -> gemini-3.1-pro-preview
         """
-        self._model_name    = model_name
-        self._prompt_config = prompt_config
-        self._client        = _genai.Client(api_key=api_key)
+        self._model_name        = model_name
+        self._prompt_config     = prompt_config
+        self._client            = _genai.Client(api_key=api_key)
+        self._batch_size        = batch_size
+        self._descriptor_config = descriptor_config
 
         if debug:
+            desc_str = descriptor_config.name if descriptor_config else "none"
             print(f"[grader] GeminiGrader ready — model={model_name}  "
-                  f"config={prompt_config.name}  target={prompt_config.target}")
+                  f"config={prompt_config.name}  target={prompt_config.target}  "
+                  f"batch_size={batch_size}  descriptors={desc_str}")
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _build_full_prompt(self, base_prompt: str) -> str:
+        """Append the descriptor section to a prompt when configured."""
+        if self._descriptor_config is None:
+            return base_prompt
+        return base_prompt + _build_desc_section(self._descriptor_config)
+
+    def _extract_vlm_descriptors(self, parsed: dict) -> dict:
+        """Extract VLM descriptor scores from a parsed JSON response dict."""
+        if self._descriptor_config is None or "descriptors" not in parsed:
+            return {}
+        block = parsed["descriptors"]
+        result = {}
+        for item in self._descriptor_config.items:
+            if item.name in block:
+                try:
+                    result[item.name] = float(block[item.name])
+                except (TypeError, ValueError):
+                    result[item.name] = 0.0
+        return result
 
     # ------------------------------------------------------------------
     # Scoring
     # ------------------------------------------------------------------
+
+    def score_batch(
+        self,
+        images: "list[tuple[str, PILImage.Image]]",
+        debug: Optional[bool] = None,
+    ) -> "dict[str, GraderOutput]":
+        """
+        Score multiple images in a single Gemini API call.
+
+        Sends all images as labeled Parts in one generate_content request.
+        Automatically splits into chunks of self._batch_size if needed.
+        """
+        import io
+        import json
+        import time
+
+        dbg = self.debug if debug is None else debug
+        results: dict[str, GraderOutput] = {}
+
+        for chunk_start in range(0, len(images), self._batch_size):
+            chunk = images[chunk_start : chunk_start + self._batch_size]
+            robot_ids = [rid for rid, _ in chunk]
+            uploaded = []
+
+            try:
+                for robot_id, img in chunk:
+                    buf = io.BytesIO()
+                    img.save(buf, format="PNG")
+                    buf.seek(0)
+                    if dbg:
+                        print(f"  [grader/gemini/batch] Uploading {robot_id} ({len(buf.getvalue())//1024} KB)...")
+                    img_file = self._client.files.upload(
+                        file=buf,
+                        config=_genai_types.UploadFileConfig(mime_type="image/png"),
+                    )
+                    while img_file.state.name == "PROCESSING":
+                        time.sleep(0.2)
+                        img_file = self._client.files.get(name=img_file.name)
+                    if img_file.state.name == "FAILED":
+                        raise RuntimeError(f"[grader/gemini/batch] Upload failed for {robot_id}")
+                    uploaded.append(img_file)
+
+                # Build contents: label, image, label, image, ..., batch_prompt
+                contents = []
+                for robot_id, img_file in zip(robot_ids, uploaded):
+                    contents.append(f"{robot_id}:")
+                    contents.append(
+                        _genai_types.Part.from_uri(file_uri=img_file.uri, mime_type="image/png")
+                    )
+                contents.append(self._build_batch_prompt(robot_ids))
+
+                if dbg:
+                    print(f"  [grader/gemini/batch] Sending {len(chunk)} images...")
+
+                response = self._client.models.generate_content(
+                    model=self._model_name,
+                    contents=contents,
+                )
+                text = response.text
+
+            finally:
+                for img_file in uploaded:
+                    self._client.files.delete(name=img_file.name)
+                if dbg:
+                    print(f"  [grader/gemini/batch] Deleted {len(uploaded)} remote files.")
+
+            # Parse JSON dict keyed by robot_id
+            stripped = text.strip()
+            if stripped.startswith("```"):
+                stripped = stripped.split("\n", 1)[-1]
+                stripped = stripped.rsplit("```", 1)[0]
+            start = stripped.find("{")
+            end = stripped.rfind("}") + 1
+            if start == -1 or end == 0:
+                raise ValueError(f"[grader/gemini/batch] No JSON in response.\nRaw:\n{text}")
+
+            parsed = json.loads(stripped[start:end])
+            for robot_id in robot_ids:
+                if robot_id not in parsed:
+                    raise ValueError(f"[grader/gemini/batch] Missing robot_id '{robot_id}' in response.")
+                results[robot_id] = self._parse_batch_entry(parsed[robot_id], dbg)
+
+        return results
+
+    def _build_batch_prompt(self, robot_ids: list) -> str:
+        """Build a multi-robot evaluation prompt that returns a JSON dict keyed by robot ID."""
+        id_list = ", ".join(robot_ids)
+        pc = self._prompt_config
+        desc_schema = ""
+        if self._descriptor_config:
+            desc_items = "\n".join(
+                f'        "{item.name}": <int 0-10>,'
+                for item in self._descriptor_config.items
+            )
+            desc_schema = (
+                '\n      "descriptors": {\n'
+                + desc_items
+                + '\n      },'
+            )
+            desc_instructions = (
+                f"\n    ═══ FEATURE DESCRIPTORS (rate for each robot) ═══\n"
+                + "\n".join(
+                    f"    {item.name}: {item.question}"
+                    for item in self._descriptor_config.items
+                )
+            )
+        else:
+            desc_instructions = ""
+
+        single_schema = (
+            "    {\n"
+            '      "observation":    "factual description",\n'
+            '      "interpretation": "interpretation description and explanation",\n'
+            '      "coherence":      { "score": <int 0-10>, "reason": "..." },\n'
+            '      "originality":    { "score": <int 0-10>, "reason": "..." },\n'
+            '      "interest":       { "score": <int 0-10>, "reason": "..." }'
+            + (f',\n{desc_schema}' if desc_schema else "")
+            + "\n    }"
+        )
+        return f"""
+    ═══ BATCH EVALUATION ═══
+
+    You will evaluate {len(robot_ids)} robot morphologies in one pass.
+    Each image was labeled before being sent: {id_list}.
+    Evaluate each one independently. Do NOT compare robots to each other.
+
+    ═══ CONTEXT (same for all robots) ═══
+
+    You are a strict and skeptical evaluator analyzing static images of MuJoCo robot morphologies.
+    Your job is to be PRECISE and reproduce human-like feedback on each robot's structural design.
+
+    The scene (applies to every image):
+    - 2 simultaneous views of the same morphology: left = front/side angle, right = 3/4 perspective
+    - dark/grey checkerboard floor
+    - Robot has a white cylindrical torso and colored limbs (red, yellow, green, purple...)
+    - The robot's morphology objective: looking like a {pc.target} (= target)
+
+    ═══ ANALYSIS (repeat for every robot) ═══
+
+    Step 1 — Factual observation
+    - Torso shape, size and position relative to the ground
+    - Number of limbs, attachment points, segment lengths and approximate angles
+    - Overall stance: upright, crouching, sprawled, collapsed?
+    - Any asymmetry or unusual structural feature
+
+    Step 2 — Morphology interpretation
+    - Does it resemble a {pc.target}? Which features match or not?
+    - Is stable locomotion physically plausible? (center of mass, ground contacts, symmetry)
+    - Originality or structural issues?
+
+    Step 3 — Score (conservative, static image only)
+
+    coherence  — How well does the morphology match a {pc.target}?
+      0-2 = no similarity | 3-4 = vague | 5-6 = partial | 7-8 = strong | 9-10 = unmistakable
+
+    originality  — Is the structural design novel?
+      0-2 = generic | 3-4 = basic | 5-6 = one interesting choice | 7-8 = novel | 9-10 = highly creative
+
+    interest  — Evolutionary/locomotion potential
+      0-2 = implausible | 3-4 = poor | 5-6 = plausible but inefficient | 7-8 = solid | 9-10 = excellent
+    {desc_instructions}
+    ═══ OUTPUT FORMAT ═══
+    Respond ONLY with valid JSON, no text before or after.
+    The top-level keys must be exactly the robot IDs: {id_list}
+    Each value follows this schema:
+{single_schema}
+    """
+
+    def _parse_batch_entry(self, parsed: dict, dbg: bool) -> GraderOutput:
+        """Convert one dict entry from a batch response into a GraderOutput."""
+        def _score(key):
+            val = parsed.get(key, {})
+            return float(val.get("score", 0) if isinstance(val, dict) else val)
+
+        def _reason(key):
+            val = parsed.get(key, {})
+            return val.get("reason", "") if isinstance(val, dict) else ""
+
+        coherence   = _score("coherence")
+        originality = _score("originality")
+        interest    = _score("interest")
+
+        w = self._prompt_config.weights
+        total_w = w.coherence + w.originality + w.interest
+        fitness = (
+            w.coherence * coherence + w.originality * originality + w.interest * interest
+        ) / (10.0 * total_w)
+
+        if dbg:
+            print(f"    coherence={coherence:.1f}  originality={originality:.1f}  "
+                  f"interest={interest:.1f}  → fitness={fitness:.4f}")
+
+        return GraderOutput(
+            fitness=round(fitness, 6),
+            raw_scores={
+                "coherence":   round(coherence, 4),
+                "originality": round(originality, 4),
+                "interest":    round(interest, 4),
+            },
+            method="gemini_batch",
+            prompt_set=self._prompt_config.name,
+            extra={
+                "observation":        parsed.get("observation", ""),
+                "interpretation":     parsed.get("interpretation", ""),
+                "coherence_reason":   _reason("coherence"),
+                "originality_reason": _reason("originality"),
+                "interest_reason":    _reason("interest"),
+                "vlm_descriptors":    self._extract_vlm_descriptors(parsed),
+            },
+        )
 
     def score(
         self,
@@ -468,7 +737,7 @@ class GeminiGrader(MorphologyGrader):
                         file_uri  = img_file.uri,
                         mime_type = "image/png",
                     ),
-                    self._prompt_config.prompt,
+                    self._build_full_prompt(self._prompt_config.prompt),
                 ],
             )
             text = response.text
@@ -526,12 +795,14 @@ class GeminiGrader(MorphologyGrader):
                 return val.get("reason", "")
             return ""
 
+        vlm_descriptors = self._extract_vlm_descriptors(parsed)
         extra = {
             "observation":        parsed.get("observation", ""),
             "interpretation":     parsed.get("interpretation", ""),
             "coherence_reason":   _reason("coherence"),
             "originality_reason": _reason("originality"),
             "interest_reason":    _reason("interest"),
+            "vlm_descriptors":    vlm_descriptors,
         }
 
         result = GraderOutput(
@@ -551,8 +822,8 @@ class GeminiGrader(MorphologyGrader):
             print(f"  → fitness = {fitness:.5f}")
             if extra.get("observation"):
                 print(f"  observation: {extra['observation'][:120]}")
-            if extra.get("interpretation"):
-                print(f"  interpretation: {extra['interpretation'][:120]}")
+            if vlm_descriptors:
+                print(f"  descriptors: {vlm_descriptors}")
 
         return result
 

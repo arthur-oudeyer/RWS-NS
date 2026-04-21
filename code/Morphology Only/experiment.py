@@ -34,6 +34,7 @@ renderer and grader (no CLIP or MuJoCo required).
 from __future__ import annotations
 
 import json
+import shutil
 import sys, os
 import time
 from pathlib import Path
@@ -51,6 +52,11 @@ from CLIP_prompts import get_clip_prompt_set
 from gemini_prompts import get_gemini_prompt_set
 from data_handler import MorphologyResult, result_to_dict
 from report       import generate_report
+try:
+    from descriptor import get_descriptor_config as _get_descriptor_config
+    _DESCRIPTOR_AVAILABLE = True
+except ImportError:
+    _DESCRIPTOR_AVAILABLE = False
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from api_keys import APIKEY_GEMINI
@@ -92,10 +98,15 @@ def _make_grader(cfg: ExperimentConfig) -> MorphologyGrader:
         )
     elif cfg.grader_type == "gemini":
         prompt_set = get_gemini_prompt_set(cfg.prompt_name)
+        descriptor_config = None
+        if _DESCRIPTOR_AVAILABLE and getattr(cfg, "descriptor_config_name", ""):
+            descriptor_config = _get_descriptor_config(cfg.descriptor_config_name)
         return GeminiGrader(
             api_key=APIKEY_GEMINI,
             prompt_config=prompt_set,
             model_name=cfg.gemini_model,
+            batch_size=cfg.batching,
+            descriptor_config=descriptor_config,
         )
     else:
         raise AttributeError(f"{cfg.grader_type} not recognised as grader.")
@@ -106,7 +117,31 @@ def _make_archive(cfg: ExperimentConfig) -> Union[MuLambdaArchive, MapEliteArchi
     if cfg.strategy == "mu_lambda":
         return MuLambdaArchive(mu=cfg.mu)
     elif cfg.strategy == "map_elite":
-        return MapEliteArchive(symmetry_bins=cfg.symmetry_bins)
+        feature_dims = None
+        feature_bins = None
+        dim_labels   = None
+        if _DESCRIPTOR_AVAILABLE and getattr(cfg, "descriptor_config_name", ""):
+            try:
+                desc_cfg     = _get_descriptor_config(cfg.descriptor_config_name)
+                feature_dims = desc_cfg.feature_dims
+                feature_bins = {
+                    item.name: item.bins
+                    for item in desc_cfg.items
+                    if item.bins
+                }
+                dim_labels = {
+                    item.name: item.bin_labels
+                    for item in desc_cfg.items
+                    if item.bin_labels
+                }
+            except KeyError:
+                pass
+        return MapEliteArchive(
+            feature_dims  = feature_dims,
+            feature_bins  = feature_bins,
+            dim_labels    = dim_labels,
+            symmetry_bins = getattr(cfg, "symmetry_bins", [0.5, 0.8]),
+        )
     else:
         raise ValueError(f"Unknown strategy '{cfg.strategy}'.")
 
@@ -240,6 +275,14 @@ def run(
     indiv_log_path = run_dir / "individuals_log.jsonl"
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    # Reset tmp render folder
+    if cfg.save_all_render_tmp:
+        tmp_render_dir = Path(cfg.output_dir) / "last_render"
+        if tmp_render_dir.exists():
+            shutil.rmtree(tmp_render_dir)
+        tmp_render_dir.mkdir(parents=True)
+        print(f"[experiment] Tmp render dir reset: {tmp_render_dir}")
+
     # Save frozen config
     cfg.save(str(run_dir / "config.json"))
     print(f"\n{'='*60}")
@@ -362,6 +405,12 @@ def resume(
     log_path       = run_dir / "log.jsonl"
     indiv_log_path = run_dir / "individuals_log.jsonl"
 
+    # Ensure tmp render folder exists (not wiped on resume — keeps previous renders)
+    if cfg.save_all_render_tmp:
+        tmp_render_dir = Path(cfg.output_dir) / "last_render"
+        tmp_render_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[experiment] Tmp render dir: {tmp_render_dir}")
+
     # Find latest snapshot
     snapshots = sorted(run_dir.glob("archive_gen*.json"))
     if not snapshots:
@@ -449,9 +498,9 @@ def _cli():
     """
     import argparse
     parser = argparse.ArgumentParser(description="Run a morphology evolution experiment.")
-    parser.add_argument("--strategy",   default="mu_lambda",
+    parser.add_argument("--strategy", default=None,
                         choices=["mu_lambda", "map_elite"],
-                        help="Evolution strategy (default: mu_lambda)")
+                        help="Evolution strategy")
     parser.add_argument("--mu",         type=int,   default=None)
     parser.add_argument("--lambda_",    type=int,   default=None)
     parser.add_argument("--n_gen",      type=int,   default=None)
@@ -467,15 +516,15 @@ def _cli():
         resume(args.resume, save_renders=args.save_renders)
         return
 
-    cfg = ExperimentConfig(
-        strategy      = args.strategy,
-        seed          = args.seed,
-        output_dir    = args.output_dir,
-    )
+    cfg = ExperimentConfig()
+
+    if args.strategy is not None: cfg.strategy = args.strategy
     if args.mu        is not None: cfg.mu              = args.mu
     if args.lambda_   is not None: cfg.lambda_         = args.lambda_
     if args.n_gen     is not None: cfg.n_generations   = args.n_gen
     if args.prompt_set is not None: cfg.prompt_set_name = args.prompt_set
+    if args.seed is not None: cfg.seed = args.seed
+    if args.output_dir is not None: cfg.output_dir = args.output_dir
 
     run(cfg, save_renders=args.save_renders)
 
