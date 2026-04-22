@@ -73,14 +73,14 @@ class ExperimentConfig:
 
     # ---- Identity -----------------------------------------------------------
     run_id:          str = ""            # filled automatically if empty
-    seed:            int = 67
+    seed:            int = 35
     description:     str = ""
     strategy:        str = "map_elite"   # "mu_lambda" | "map_elite"
 
     # ---- Population ---------------------------------------------------------
     mu:              int = 4            # number of parents kept each generation
-    lambda_:         int = 18           # number of offspring produced each generation by mutating the previous generation
-    sigma:           int = 2            # number of fresh random morphologies injected each generation
+    lambda_:         int = 17           # number of offspring produced each generation by mutating the previous generation
+    sigma:           int = 3            # number of fresh random morphologies injected each generation
     n_generations:   int = 10
 
     # Time estimation single call : 10 s * number of robot * generations
@@ -94,7 +94,7 @@ class ExperimentConfig:
 
     # Range of leg count for randomly generated morphologies (structure, not count)
     init_n_legs_min: int = 1
-    init_n_legs_max: int = 7
+    init_n_legs_max: int = 6
 
     # Number of random mutations made initially to each base individual
     init_n_mutation: int = 5
@@ -122,6 +122,15 @@ class ExperimentConfig:
     render_height:   int   = 192
     camera_views:    list  = field(default_factory=lambda: list(DEFAULT_CAMERA_VIEWS))
     floor_clearance: float = 0   # metres of clearance above z=0 (auto spawn-height)
+    # When True: grass floor texture + blue-sky skybox, to improve VLM sensitivity
+    # (VLMs such as Gemini respond more strongly to photorealistic environments).
+    photorealistic:  bool  = True
+
+    # When True (batch mode only): the current best individual's image is sent to
+    # Gemini as a labelled reference alongside each batch.  Gemini is instructed
+    # NOT to score it but to use it as a baseline so it can reward genuine novelty
+    # and real improvement rather than minor variants of the incumbent.
+    reference_best_in_batch: bool = False
 
     # ---- Grader -------------------------------------------------------------
     grader_type: str = "gemini"  # "clip" | "gemini"
@@ -138,14 +147,14 @@ class ExperimentConfig:
     # Gemini 3 Flash        -> gemini-3-flash-preview           ~10s/image (batch -> ~5s/imag)
     # Gemini 3.1 Pro        -> gemini-3.1-pro-preview           ~15s/image
     gemini_model:    str = "gemini-3-flash-preview"
-    batching:        int = 10
+    batching:        int = 20
 
     # ---- Prompt -------------------------------------------------------------
-    prompt_name:     str = "centipede_morph"
+    prompt_name:     str = "lamp_morph"
 
     # ---- Descriptor (VLM-based MapElite feature assessment) -----------------
     # Name of a DescriptorConfig from descriptor.py; "" = structural-only mode.
-    descriptor_config_name: str = "generic_descriptors"
+    descriptor_config_name: str = "lamp_descriptors"
 
     # ---- Output -------------------------------------------------------------
     output_dir:            str  = "results"

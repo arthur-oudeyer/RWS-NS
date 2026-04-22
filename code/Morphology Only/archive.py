@@ -283,11 +283,17 @@ class MapEliteArchive:
         for dim in self.feature_dims:
             val = result.descriptors.get(dim)
             if val is None:
-                raise KeyError(
-                    f"[MapEliteArchive] Descriptor '{dim}' missing in result "
-                    f"id={result.individual_id}. "
+                # VLM did not return this descriptor (e.g. malformed JSON).
+                # Fall back to bin 0 so the result is still stored rather than
+                # silently dropped — a dropped result would leave the grid empty
+                # and crash archive.best().
+                print(
+                    f"[MapEliteArchive] WARNING: descriptor '{dim}' missing for "
+                    f"id={result.individual_id} — placing in bin 0. "
                     f"Available keys: {list(result.descriptors.keys())}"
                 )
+                key.append(0)
+                continue
             edges = self.feature_bins.get(dim, [])
             if edges:
                 key.append(self._bin(float(val), edges))

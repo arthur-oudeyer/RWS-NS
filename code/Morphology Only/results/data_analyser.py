@@ -102,10 +102,11 @@ def load_run(run_dir: Path) -> dict:
         elif "grid" in arc:
             data["population"] = list(arc["grid"].values())
             data["grid"] = arc["grid"]  # raw {key_str: individual_dict}
-            # feature_dims stored in the archive itself (set by MapEliteArchive)
+            # feature_dims / dim_labels stored in the archive (set by MapEliteArchive)
             if "feature_dims" in arc:
-                data["config"].setdefault("map_elite_feature_dims",
-                                          arc["feature_dims"])
+                data["config"].setdefault("map_elite_feature_dims", arc["feature_dims"])
+            if "dim_labels" in arc:
+                data["config"].setdefault("map_elite_dim_labels", arc["dim_labels"])
 
     # all_individuals: prefer streaming log (has genealogy), fall back to population
     indiv_records = _read_jsonl(run_dir / "individuals_log.jsonl")
@@ -436,15 +437,28 @@ def draw_grid_coverage(ax, run_data: dict, sel_id) -> None:
                     fill=False, edgecolor="#4488FF", lw=2.5, zorder=5,
                 ))
 
-    cfg   = run_data.get("config", {})
-    dims  = cfg.get("map_elite_feature_dims") or ["dim0", "dim1"]
+    cfg        = run_data.get("config", {})
+    dims       = cfg.get("map_elite_feature_dims") or ["dim0", "dim1"]
+    dim_labels = cfg.get("map_elite_dim_labels") or {}
     dim_x = dims[0] if len(dims) > 0 else "dim0"
     dim_y = dims[1] if len(dims) > 1 else "dim1"
 
+    def _bin_labels(dim: str, n_bins: int, offset: int) -> list[str]:
+        """Return tick labels for a dimension: bin_labels if available, else indices."""
+        labels = dim_labels.get(dim, [])
+        result = []
+        for i in range(n_bins):
+            idx = offset + i
+            if labels and idx < len(labels):
+                result.append(labels[idx])
+            else:
+                result.append(str(idx))
+        return result
+
     ax.set_xticks(range(nx))
-    ax.set_xticklabels([str(x_min + i) for i in range(nx)], fontsize=7)
+    ax.set_xticklabels(_bin_labels(dim_x, nx, x_min), fontsize=7, rotation=15, ha="right")
     ax.set_yticks(range(ny))
-    ax.set_yticklabels([str(y_min + i) for i in range(ny)], fontsize=7)
+    ax.set_yticklabels(_bin_labels(dim_y, ny, y_min), fontsize=7)
     ax.set_xlabel(dim_x.replace("_", " "), fontsize=9)
     ax.set_ylabel(dim_y.replace("_", " "), fontsize=9)
     ax.set_title(

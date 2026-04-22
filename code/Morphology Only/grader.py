@@ -195,6 +195,7 @@ class MorphologyGrader(ABC):
         self,
         images: "list[tuple[str, PILImage.Image]]",
         debug: Optional[bool] = None,
+        reference_image: "Optional[PILImage.Image]" = None,
     ) -> "dict[str, GraderOutput]":
         """
         Score multiple images, returning a dict keyed by robot_id.
@@ -204,8 +205,11 @@ class MorphologyGrader(ABC):
 
         Parameters
         ----------
-        images : list of (robot_id, PIL Image) pairs.
-        debug  : overrides self.debug for this call if not None.
+        images          : list of (robot_id, PIL Image) pairs.
+        debug           : overrides self.debug for this call if not None.
+        reference_image : optional reference image (e.g. current best).
+                          Ignored by the default loop implementation; only
+                          GeminiGrader uses it to anchor the batch prompt.
         """
         return {robot_id: self.score(img, debug=debug) for robot_id, img in images}
 
@@ -422,6 +426,7 @@ class GeminiGrader(MorphologyGrader):
         model_name:        str  = "gemini-3-flash-preview",
         batch_size:        int  = 10,
         descriptor_config: "Optional[_DescriptorConfig]" = None,
+        response_log_path: "Optional[str]" = None,
         debug:             bool = False,
     ):
         if not _GEMINI_AVAILABLE:
@@ -444,6 +449,7 @@ class GeminiGrader(MorphologyGrader):
         self._client            = _genai.Client(api_key=api_key)
         self._batch_size        = batch_size
         self._descriptor_config = descriptor_config
+        self._response_log_path = response_log_path
 
         if debug:
             desc_str = descriptor_config.name if descriptor_config else "none"
@@ -475,6 +481,21 @@ class GeminiGrader(MorphologyGrader):
                     result[item.name] = 0.0
         return result
 
+    def _log_response(self, mode: str, robot_ids: list, raw_text: str) -> None:
+        """Append the raw VLM response to the response log file (one JSON line)."""
+        if not self._response_log_path:
+            return
+        import json as _json
+        from datetime import datetime as _dt
+        entry = {
+            "ts":        _dt.now().isoformat(timespec="seconds"),
+            "mode":      mode,
+            "robot_ids": robot_ids,
+            "raw":       raw_text,
+        }
+        with open(self._response_log_path, "a") as f:
+            f.write(_json.dumps(entry) + "\n")
+
     # ------------------------------------------------------------------
     # Scoring
     # ------------------------------------------------------------------
@@ -483,12 +504,24 @@ class GeminiGrader(MorphologyGrader):
         self,
         images: "list[tuple[str, PILImage.Image]]",
         debug: Optional[bool] = None,
+        reference_image: "Optional[PILImage.Image]" = None,
     ) -> "dict[str, GraderOutput]":
         """
         Score multiple images in a single Gemini API call.
 
         Sends all images as labeled Parts in one generate_content request.
         Automatically splits into chunks of self._batch_size if needed.
+
+        Parameters
+        ----------
+        images          : list of (robot_id, PIL Image) pairs to evaluate.
+        debug           : overrides self.debug for this call if not None.
+        reference_image : optional image of the current best individual.
+                          When provided it is prepended to every chunk as a
+                          labelled "reference" Part and the prompt is updated
+                          to instruct Gemini not to score it but to use it as
+                          a baseline for judging novelty and improvement.
+                          The reference is never included in the returned dict.
         """
         import io
         import json
@@ -497,12 +530,35 @@ class GeminiGrader(MorphologyGrader):
         dbg = self.debug if debug is None else debug
         results: dict[str, GraderOutput] = {}
 
+        # Pre-encode reference image once (reused for every chunk)
+        ref_bytes: Optional[bytes] = None
+        if reference_image is not None:
+            ref_buf = io.BytesIO()
+            reference_image.save(ref_buf, format="PNG")
+            ref_bytes = ref_buf.getvalue()
+
         for chunk_start in range(0, len(images), self._batch_size):
             chunk = images[chunk_start : chunk_start + self._batch_size]
             robot_ids = [rid for rid, _ in chunk]
             uploaded = []
+            ref_file = None
 
             try:
+                # Upload reference first (if provided)
+                if ref_bytes is not None:
+                    if dbg:
+                        print(f"  [grader/gemini/batch] Uploading reference ({len(ref_bytes)//1024} KB)...")
+                    ref_file = self._client.files.upload(
+                        file=io.BytesIO(ref_bytes),
+                        config=_genai_types.UploadFileConfig(mime_type="image/png"),
+                    )
+                    while ref_file.state.name == "PROCESSING":
+                        time.sleep(0.2)
+                        ref_file = self._client.files.get(name=ref_file.name)
+                    if ref_file.state.name == "FAILED":
+                        raise RuntimeError("[grader/gemini/batch] Reference image upload failed")
+
+                # Upload candidate robots
                 for robot_id, img in chunk:
                     buf = io.BytesIO()
                     img.save(buf, format="PNG")
@@ -520,29 +576,39 @@ class GeminiGrader(MorphologyGrader):
                         raise RuntimeError(f"[grader/gemini/batch] Upload failed for {robot_id}")
                     uploaded.append(img_file)
 
-                # Build contents: label, image, label, image, ..., batch_prompt
+                # Build contents: [reference?,] label, image, label, image, ..., prompt
                 contents = []
+                if ref_file is not None:
+                    contents.append("reference:")
+                    contents.append(
+                        _genai_types.Part.from_uri(file_uri=ref_file.uri, mime_type="image/png")
+                    )
                 for robot_id, img_file in zip(robot_ids, uploaded):
                     contents.append(f"{robot_id}:")
                     contents.append(
                         _genai_types.Part.from_uri(file_uri=img_file.uri, mime_type="image/png")
                     )
-                contents.append(self._build_batch_prompt(robot_ids))
+                contents.append(self._build_batch_prompt(robot_ids, has_reference=ref_file is not None))
 
                 if dbg:
-                    print(f"  [grader/gemini/batch] Sending {len(chunk)} images...")
+                    ref_str = " + reference" if ref_file else ""
+                    print(f"  [grader/gemini/batch] Sending {len(chunk)} images{ref_str}...")
 
                 response = self._client.models.generate_content(
                     model=self._model_name,
                     contents=contents,
                 )
                 text = response.text
+                self._log_response("batch", robot_ids, text)
 
             finally:
                 for img_file in uploaded:
                     self._client.files.delete(name=img_file.name)
+                if ref_file is not None:
+                    self._client.files.delete(name=ref_file.name)
                 if dbg:
-                    print(f"  [grader/gemini/batch] Deleted {len(uploaded)} remote files.")
+                    n_del = len(uploaded) + (1 if ref_file else 0)
+                    print(f"  [grader/gemini/batch] Deleted {n_del} remote files.")
 
             # Parse JSON dict keyed by robot_id
             stripped = text.strip()
@@ -555,6 +621,8 @@ class GeminiGrader(MorphologyGrader):
                 raise ValueError(f"[grader/gemini/batch] No JSON in response.\nRaw:\n{text}")
 
             parsed = json.loads(stripped[start:end])
+            # Drop any stray "reference" key Gemini may have included
+            parsed.pop("reference", None)
             for robot_id in robot_ids:
                 if robot_id not in parsed:
                     raise ValueError(f"[grader/gemini/batch] Missing robot_id '{robot_id}' in response.")
@@ -562,10 +630,32 @@ class GeminiGrader(MorphologyGrader):
 
         return results
 
-    def _build_batch_prompt(self, robot_ids: list) -> str:
-        """Build a multi-robot evaluation prompt that returns a JSON dict keyed by robot ID."""
+    def _build_batch_prompt(self, robot_ids: list, has_reference: bool = False) -> str:
+        """
+        Build the batch evaluation prompt.
+
+        The CONTEXT, ANALYSIS, and scoring-criteria sections are taken verbatim
+        from self._prompt_config.prompt (defined in gemini_prompts.py) — split
+        at the OUTPUT FORMAT marker so that updating gemini_prompts.py
+        automatically applies to batch mode.  Only the batch-specific framing
+        (robot IDs, reference section, multi-robot JSON schema) is built here.
+        """
         id_list = ", ".join(robot_ids)
-        pc = self._prompt_config
+
+        # --- Reuse CONTEXT + ANALYSIS from the config prompt ---
+        # Everything before "═══ OUTPUT FORMAT ═══" is the evaluation body.
+        _OUTPUT_MARKER = "═══ OUTPUT FORMAT ═══"
+        base = self._prompt_config.prompt
+        if _OUTPUT_MARKER in base:
+            body = base[:base.index(_OUTPUT_MARKER)].rstrip()
+        else:
+            body = base.rstrip()
+
+        # Append descriptor instructions if configured (mirrors _build_full_prompt)
+        if self._descriptor_config and _DESCRIPTOR_AVAILABLE:
+            body = body + _build_desc_section(self._descriptor_config)
+
+        # --- Per-robot JSON output schema ---
         desc_schema = ""
         if self._descriptor_config:
             desc_items = "\n".join(
@@ -573,77 +663,55 @@ class GeminiGrader(MorphologyGrader):
                 for item in self._descriptor_config.items
             )
             desc_schema = (
-                '\n      "descriptors": {\n'
+                '      "descriptors": {\n'
                 + desc_items
                 + '\n      },'
             )
-            desc_instructions = (
-                f"\n    ═══ FEATURE DESCRIPTORS (rate for each robot) ═══\n"
-                + "\n".join(
-                    f"    {item.name}: {item.question}"
-                    for item in self._descriptor_config.items
-                )
-            )
-        else:
-            desc_instructions = ""
 
         single_schema = (
-            "    {\n"
-            '      "observation":    "factual description",\n'
-            '      "interpretation": "interpretation description and explanation",\n'
+            "{\n"
+            '      "observation":    "factual description of what you see",\n'
+            '      "interpretation": "structural interpretation relative to the target",\n'
             '      "coherence":      { "score": <int 0-10>, "reason": "..." },\n'
             '      "originality":    { "score": <int 0-10>, "reason": "..." },\n'
             '      "interest":       { "score": <int 0-10>, "reason": "..." }'
             + (f',\n{desc_schema}' if desc_schema else "")
             + "\n    }"
         )
+
+        # --- Reference section ---
+        reference_section = ""
+        if has_reference:
+            reference_section = f"""
+    ═══ REFERENCE IMAGE ═══
+
+    The first image labeled "reference" shows the CURRENT BEST-PERFORMING robot from the previous generation.
+    It is provided as a contextual baseline ONLY.
+    — Do NOT score the reference. Do NOT include "reference" as a key in your JSON output.
+    — Your goal is NOT to reward morphologies that merely look like the reference.
+    Instead, use the reference to better identify and reward:
+      • Genuine structural novelty: designs clearly different from the reference in limb count,
+        body plan, attachment points, or overall stance.
+      • Real improvement: morphologies that address visible weaknesses of the reference
+        (e.g. better ground contact, more coherent body plan, more {self._prompt_config.target}-like structure).
+      • Interesting new traits the reference does not have.
+    If a candidate robot is merely a minor variant of the reference, do not inflate its scores.
+            """
+
         return f"""
     ═══ BATCH EVALUATION ═══
 
     You will evaluate {len(robot_ids)} robot morphologies in one pass.
     Each image was labeled before being sent: {id_list}.
-    Evaluate each one independently. Do NOT compare robots to each other.
+    Evaluate each one independently.
+    {reference_section}
+    {body}
 
-    ═══ CONTEXT (same for all robots) ═══
-
-    You are a strict and skeptical evaluator analyzing static images of MuJoCo robot morphologies.
-    Your job is to be PRECISE and reproduce human-like feedback on each robot's structural design.
-
-    The scene (applies to every image):
-    - 2 simultaneous views of the same morphology: left = front/side angle, right = 3/4 perspective
-    - dark/grey checkerboard floor
-    - Robot has a white cylindrical torso and colored limbs (red, yellow, green, purple...)
-    - The robot's morphology objective: looking like a {pc.target} (= target)
-
-    ═══ ANALYSIS (repeat for every robot) ═══
-
-    Step 1 — Factual observation
-    - Torso shape, size and position relative to the ground
-    - Number of limbs, attachment points, segment lengths and approximate angles
-    - Overall stance: upright, crouching, sprawled, collapsed?
-    - Any asymmetry or unusual structural feature
-
-    Step 2 — Morphology interpretation
-    - Does it resemble a {pc.target}? Which features match or not?
-    - Is stable locomotion physically plausible? (center of mass, ground contacts, symmetry)
-    - Originality or structural issues?
-
-    Step 3 — Score (conservative, static image only)
-
-    coherence  — How well does the morphology match a {pc.target}?
-      0-2 = no similarity | 3-4 = vague | 5-6 = partial | 7-8 = strong | 9-10 = unmistakable
-
-    originality  — Is the structural design novel?
-      0-2 = generic | 3-4 = basic | 5-6 = one interesting choice | 7-8 = novel | 9-10 = highly creative
-
-    interest  — Evolutionary/locomotion potential
-      0-2 = implausible | 3-4 = poor | 5-6 = plausible but inefficient | 7-8 = solid | 9-10 = excellent
-    {desc_instructions}
     ═══ OUTPUT FORMAT ═══
     Respond ONLY with valid JSON, no text before or after.
     The top-level keys must be exactly the robot IDs: {id_list}
     Each value follows this schema:
-{single_schema}
+    {single_schema}
     """
 
     def _parse_batch_entry(self, parsed: dict, dbg: bool) -> GraderOutput:
@@ -741,6 +809,7 @@ class GeminiGrader(MorphologyGrader):
                 ],
             )
             text = response.text
+            self._log_response("single", [], text)
         finally:
             self._client.files.delete(name=img_file.name)
             if dbg:
@@ -829,59 +898,71 @@ class GeminiGrader(MorphologyGrader):
 
 
 # ---------------------------------------------------------------------------
-# Debug — run directly to test the full grader pipeline
+# Debug — print the exact prompts that will be sent to the VLM
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import sys
     sys.path.insert(0, str(Path(__file__).parent))
 
-    from morphology    import QUADRIPOD, TRIPOD, HEXAPOD
-    from rendering     import MorphologyRenderer, RenderConfig
-    from CLIP_prompts  import SPIDER_BODY, MANY_LEGS, COMPACT_STABLE, ALL_PROMPT_SETS
+    from config          import ExperimentConfig
+    from gemini_prompts  import get_gemini_prompt_set
+    from descriptor      import get_descriptor_config
 
-    print("=" * 60)
-    print("  grader.py — debug mode")
-    print("=" * 60)
+    SEP  = "═" * 72
+    SEP2 = "─" * 72
 
-    if not _TORCH_AVAILABLE or not _CLIP_AVAILABLE:
-        print("ERROR: torch and open_clip must be installed.")
+    print(SEP)
+    print("  grader.py — prompt preview")
+    print(SEP)
+
+    if not _GEMINI_AVAILABLE:
+        print("ERROR: google-genai is not installed — cannot build GeminiGrader.")
         sys.exit(1)
 
-    # --- Render test morphologies ---
-    print("\n[1] Rendering test morphologies...")
-    render_cfg = RenderConfig(width=256, height=256, debug=False)
-    renderer   = MorphologyRenderer(render_cfg)
+    # --- Load config and build grader (dummy key — no network call for printing) ---
+    cfg           = ExperimentConfig()
+    prompt_config = get_gemini_prompt_set(cfg.prompt_name)
+    desc_config   = None
+    if _DESCRIPTOR_AVAILABLE and getattr(cfg, "descriptor_config_name", ""):
+        try:
+            desc_config = get_descriptor_config(cfg.descriptor_config_name)
+        except KeyError:
+            pass
 
-    images = {}
-    for morph in (TRIPOD, QUADRIPOD, HEXAPOD):
-        images[morph.name] = renderer.render(morph)
-        print(f"  rendered {morph.name}")
-
-    # --- Score with multiple prompt sets ---
-    print("\n[2] Scoring with SPIDER_BODY (cosine)\n")
-    grader = CLIPGrader(
-        prompt_set     = SPIDER_BODY,
-        scoring_method = "cosine",
-        debug          = True,
+    grader = GeminiGrader(
+        api_key           = "DUMMY_KEY",
+        prompt_config     = prompt_config,
+        model_name        = cfg.gemini_model,
+        batch_size        = cfg.batching,
+        descriptor_config = desc_config,
     )
 
-    results = {}
-    for name, img in images.items():
-        result = grader.score(img, debug=True)
-        results[name] = result
+    print(f"\n  Config         : {cfg.run_id}")
+    print(f"  Prompt name    : {cfg.prompt_name}  (target: {prompt_config.target})")
+    print(f"  Gemini model   : {cfg.gemini_model}")
+    print(f"  Descriptor cfg : {desc_config.name if desc_config else 'none'}")
+    print(f"  Reference best : {getattr(cfg, 'reference_best_in_batch', False)}")
+    print(f"  Batch size     : {cfg.batching}")
 
-    # --- Compare fitness across morphologies ---
-    print("\n[3] Fitness comparison (SPIDER_BODY)\n")
-    for name, res in sorted(results.items(), key=lambda x: -x[1].fitness):
-        print(f"  {name:<14}  fitness={res.fitness:+.5f}")
+    # --- [1] Single-image prompt ---
+    print(f"\n{SEP}")
+    print("  [1] SINGLE-IMAGE PROMPT  (used by score())")
+    print(SEP)
+    print(grader._build_full_prompt(prompt_config.prompt))
 
-    # --- Compare softmax vs cosine on QUADRIPOD ---
-    print("\n[4] Softmax vs Cosine on QUADRIPOD\n")
-    for method in ("cosine", "softmax"):
-        g = CLIPGrader(prompt_set=MANY_LEGS, scoring_method=method, debug=False)
-        r = g.score(images["quadripod"])
-        print(f"  {method:<10}  fitness={r.fitness:+.5f}")
+    # --- [2] Batch prompt — no reference ---
+    fake_ids = [f"robot_{i:03d}" for i in range(1, min(cfg.batching, 4) + 1)]
+    print(f"\n{SEP}")
+    print(f"  [2] BATCH PROMPT — no reference  ({len(fake_ids)} robots: {', '.join(fake_ids)})")
+    print(SEP)
+    print(grader._build_batch_prompt(fake_ids, has_reference=False))
 
-    renderer.close()
-    print("\nAll grader tests done.")
+    # --- [3] Batch prompt — with reference ---
+    print(f"\n{SEP}")
+    print(f"  [3] BATCH PROMPT — with reference  (reference_best_in_batch=True)")
+    print(SEP)
+    print(grader._build_batch_prompt(fake_ids, has_reference=True))
+
+    print(f"\n{SEP2}")
+    print("  Done — no API calls made.")

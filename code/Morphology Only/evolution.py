@@ -111,14 +111,15 @@ class BaseEvolution(ABC):
 
     def _evaluate_batch(
         self,
-        morphs:      list[RobotMorphology],
+        morphs:          list[RobotMorphology],
         renderer,
         grader,
-        generation:  int,
-        id_counter:  int,
-        save_renders: bool = False,
-        render_dir:   Optional[str] = None,
-        parent_ids:   Optional[list[int]] = None,
+        generation:      int,
+        id_counter:      int,
+        save_renders:    bool = False,
+        render_dir:      Optional[str] = None,
+        parent_ids:      Optional[list[int]] = None,
+        reference_image = None,
     ) -> tuple[list[MorphologyResult], int]:
         """
         Evaluate a list of morphologies and return (results, new_id_counter).
@@ -160,6 +161,7 @@ class BaseEvolution(ABC):
             id_counter=id_counter,
             render_save_paths=render_paths,
             parent_ids=parent_ids,
+            reference_image=reference_image,
         )
 
         # When both tmp and gen dirs are active, copy renders to gen dir too
@@ -276,17 +278,25 @@ class MuLambdaEvolution(BaseEvolution):
         sampled_parents = archive.get_parent_results(self.cfg.lambda_)
         parent_ids      = [r.individual_id for r in sampled_parents]
 
+        # Render current best as reference image for batch grading (optional)
+        ref_image = None
+        if getattr(self.cfg, "reference_best_in_batch", False):
+            best = archive.best()
+            if best is not None:
+                ref_image = renderer.render(best.morphology)
+
         # 2. Mutate → λ offspring morphologies
         offspring_morphs = [self._mutate_one(r.morphology) for r in sampled_parents]
 
         # 3. Evaluate offspring, recording which parent each came from
         offspring_results, id_counter = self._evaluate_batch(
             offspring_morphs, renderer, grader,
-            generation   = generation,
-            id_counter   = id_counter,
-            save_renders = save_renders,
-            render_dir   = render_dir,
-            parent_ids   = parent_ids,
+            generation      = generation,
+            id_counter      = id_counter,
+            save_renders    = save_renders,
+            render_dir      = render_dir,
+            parent_ids      = parent_ids,
+            reference_image = ref_image,
         )
 
         # 4. Pool = current μ parents (already evaluated, re-tagged for this
@@ -314,11 +324,12 @@ class MuLambdaEvolution(BaseEvolution):
             random_morphs = self._random_population(self.cfg.sigma)
             random_results, id_counter = self._evaluate_batch(
                 random_morphs, renderer, grader,
-                generation   = generation,
-                id_counter   = id_counter,
-                save_renders = save_renders,
-                render_dir   = render_dir,
-                parent_ids   = None,
+                generation      = generation,
+                id_counter      = id_counter,
+                save_renders    = save_renders,
+                render_dir      = render_dir,
+                parent_ids      = None,
+                reference_image = ref_image,
             )
 
         return parent_results + offspring_results + random_results, id_counter
@@ -384,17 +395,25 @@ class MapEliteEvolution(BaseEvolution):
         sampled_parents = archive.get_parent_results(self.cfg.lambda_)
         parent_ids      = [r.individual_id for r in sampled_parents]
 
-        # 2. Mutate → λ offspring morphologies + 𝞂 brand-new morphology
+        # Render current best as reference image for batch grading (optional)
+        ref_image = None
+        if getattr(self.cfg, "reference_best_in_batch", False):
+            best = archive.best()
+            if best is not None:
+                ref_image = renderer.render(best.morphology)
+
+        # 2. Mutate → λ offspring morphologies + σ brand-new morphologies
         offspring_morphs = [self._mutate_one(r.morphology) for r in sampled_parents] + self._random_population(self.cfg.sigma)
 
         # 3. Evaluate offspring only (MAP-Elites never re-evaluates incumbents)
         return self._evaluate_batch(
             offspring_morphs, renderer, grader,
-            generation   = generation,
-            id_counter   = id_counter,
-            save_renders = save_renders,
-            render_dir   = render_dir,
-            parent_ids   = parent_ids,
+            generation      = generation,
+            id_counter      = id_counter,
+            save_renders    = save_renders,
+            render_dir      = render_dir,
+            parent_ids      = parent_ids,
+            reference_image = ref_image,
         )
 
 

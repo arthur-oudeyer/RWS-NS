@@ -204,6 +204,7 @@ def evaluate_batch(
     render_save_paths: Optional[list] = None,
     parent_ids:        Optional[list] = None,
     debug:             bool = False,
+    reference_image=None,
 ) -> tuple[list[MorphologyResult], int]:
     """
     Evaluate a list of morphologies, batching the grading step.
@@ -247,7 +248,7 @@ def evaluate_batch(
         labeled_images.append((f"robot_{ids[i]}", image))
 
     # Grade all images in one batch call
-    grader_outputs = grader.score_batch(labeled_images, debug=debug)
+    grader_outputs = grader.score_batch(labeled_images, debug=debug, reference_image=reference_image)
 
     # Assemble results
     results = []

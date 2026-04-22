@@ -105,6 +105,7 @@ class GenParams:
     # Rendering
     render_size:      int   = 192
     floor_clearance:  float = 0.   # metres of clearance above the floor
+    photorealistic:   bool  = True  # grass floor + blue-sky skybox
 
 
 # ---------------------------------------------------------------------------
@@ -570,6 +571,16 @@ class MorphSorterApp:
             self._init_renderer()
         add_slider("floor_clearance", "Floor margin (m)", 0.0, 0.30, 0.01, False, _floor_cb)
 
+        self._photorealistic_var = tk.BooleanVar(value=self.params.photorealistic)
+        tk.Checkbutton(
+            p, text="Photorealistic (grass + sky)",
+            variable=self._photorealistic_var,
+            bg=self._BG2, fg=self._FG, selectcolor="#444444",
+            activebackground=self._BG2, activeforeground=self._FG,
+            font=("Helvetica", 9),
+            command=self._on_photorealistic_change,
+        ).pack(anchor="w", padx=10, pady=(4, 0))
+
         # ---- Stats ----
         separator()
         section("Session stats")
@@ -605,6 +616,7 @@ class MorphSorterApp:
                 CameraView(azimuth=45,  elevation=-50, distance=2.),
             ],
             floor_clearance = self.params.floor_clearance,
+            photorealistic  = self.params.photorealistic,
         )
         self._renderer = MorphologyRenderer(cfg)
         self._renderer_size = sz
@@ -614,6 +626,10 @@ class MorphSorterApp:
         self.params.render_size = new_sz
         if new_sz != self._renderer_size:
             self._init_renderer()
+
+    def _on_photorealistic_change(self):
+        self.params.photorealistic = self._photorealistic_var.get()
+        self._init_renderer()
 
     # ------------------------------------------------------------------
     # Rendering  (main-thread, via root.after)

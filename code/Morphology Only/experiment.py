@@ -81,6 +81,7 @@ def _make_renderer(cfg: ExperimentConfig) -> MorphologyRenderer:
         height          = cfg.render_height,
         camera_views    = views,
         floor_clearance = cfg.floor_clearance,
+        photorealistic  = cfg.photorealistic,
     )
     return MorphologyRenderer(render_cfg)
 
@@ -107,6 +108,7 @@ def _make_grader(cfg: ExperimentConfig) -> MorphologyGrader:
             model_name=cfg.gemini_model,
             batch_size=cfg.batching,
             descriptor_config=descriptor_config,
+            response_log_path=str(cfg.run_dir / "vlm_responses.jsonl"),
         )
     else:
         raise AttributeError(f"{cfg.grader_type} not recognised as grader.")
@@ -233,16 +235,13 @@ def _print_progress(
     extra = ""
     if hasattr(archive, "grid"):
         extra = f"  cells={len(archive.grid)}"
+    best_str = f"{best.fitness:+.5f}" if best is not None else "N/A"
+    mean_str = f"{stats.mean_fitness:+.5f}" if stats is not None else "N/A"
     print(
         f"[gen {generation:>3} / {n_generations}]  "
         f"{phase:<8}  n={len(results):<4}  "
-        f"best={best.fitness:+.5f}  "
-        f"mean={stats.mean_fitness:+.5f}" if stats else
-        f"[gen {generation:>3} / {n_generations}]  "
-        f"{phase:<8}  n={len(results):<4}  "
-        f"best={best.fitness if best else '?':+.5f}",
-        f"  {elapsed_s:.1f}s{extra}",
-        sep="",
+        f"best={best_str}  mean={mean_str}  "
+        f"{elapsed_s:.1f}s{extra}",
     )
 
 

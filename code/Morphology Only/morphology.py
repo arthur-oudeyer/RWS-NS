@@ -260,70 +260,68 @@ HEXAPOD = RobotMorphology(
 
 def compute_spawn_height(morph: RobotMorphology, floor_clearance: float = 0.05) -> float:
     """
-    Compute the minimum torso spawn height (z position) so that no part of
-    the robot (torso bottom, leg tips, body parts) penetrates the floor (z=0).
+    Compute the torso spawn height (z position) so that:
+      1. No part of the robot penetrates the floor (z=0).
+      2. At least one foot touches the floor exactly (foot sphere bottom = z=0),
+         provided terminal legs exist.
+
+    Feet land at z=0 without floor_clearance offset — clearance is only applied
+    to the torso bottom and body parts to avoid rendering artefacts.
+    If no terminal leg exists, clearance is applied uniformly as before.
 
     The calculation uses the rest-pose geometry:
-      - Each leg segment with rest_angle α and length L drops by L·cos(α)
-        from its attachment point.
-      - Drops along a leg chain accumulate additively (conservative estimate).
+      - Each leg segment with rest_angle α and length L drops by L·cos(α).
+      - Drops along a chain accumulate additively.
       - Body parts at leg tips extend the drop by the body part's half-height.
       - Leg tips end in a foot sphere of radius foot_radius.
-
-    All positions are expressed relative to the torso centre (z=0 in torso
-    frame), so the result directly gives the required spawn_height.
 
     Parameters
     ----------
     morph           : RobotMorphology to analyse.
-    floor_clearance : extra clearance above the floor (metres).
+    floor_clearance : clearance margin applied to the torso and body parts (m).
 
     Returns
     -------
     Required torso spawn_height in metres.
     """
-    # Map leg_idx → z of its last joint tip (relative to torso centre, negative = below)
     leg_tip_z: dict[int, float] = {}
-    # Map body_part_idx → z of its centre
     body_part_z: dict[int, float] = {}
-    # Map parent_leg_idx → body_part_idx (only one body part per leg)
     body_part_at_leg: dict[int, int] = {
         bp.parent_leg_idx: bp_idx for bp_idx, bp in enumerate(morph.body_parts)
     }
 
-    # Start with torso bottom as minimum drop
-    max_drop: float = morph.torso_height  # half-height of torso cylinder
+    # Torso bottom and body parts need clearance; feet do not.
+    non_foot_drop: float = morph.torso_height
+    foot_drop:     float = 0.0
+    has_terminal_leg:    bool  = False
 
     for leg_idx, leg in enumerate(morph.legs):
-        # Cumulative Z-drop of this leg's chain (L·cos(α) per segment)
         z_drop = sum(j.length * math.cos(j.rest_angle) for j in leg.joints)
 
-        # Attachment Z (relative to torso centre)
         if leg.parent_leg_idx is None and leg.body_part_idx is None:
-            # Root leg — attaches at the torso rim (same Z as torso centre)
             attach_z = 0.0
         elif leg.body_part_idx is not None:
-            # Body-part leg — attaches at the body part centre
             attach_z = body_part_z.get(leg.body_part_idx, 0.0)
         else:
-            # Branched leg — attaches at its parent leg's tip
             attach_z = leg_tip_z.get(leg.parent_leg_idx, 0.0)
 
         tip_z = attach_z - z_drop
         leg_tip_z[leg_idx] = tip_z
 
         if leg_idx in body_part_at_leg:
-            # This leg carries a body part at its tip — record body-part Z
             bp_idx = body_part_at_leg[leg_idx]
             bp = morph.body_parts[bp_idx]
             body_part_z[bp_idx] = tip_z
-            # Body part itself extends down by its half-height
-            max_drop = max(max_drop, -tip_z + bp.height)
+            non_foot_drop = max(non_foot_drop, -tip_z + bp.height)
         else:
-            # Terminal leg — tip has a foot sphere
-            max_drop = max(max_drop, -tip_z + morph.foot_radius)
+            has_terminal_leg = True
+            foot_drop = max(foot_drop, -tip_z + morph.foot_radius)
 
-    return max_drop + floor_clearance
+    if has_terminal_leg:
+        # Lowest foot touches z=0; torso/body parts still get their clearance.
+        return max(foot_drop, non_foot_drop + floor_clearance)
+    else:
+        return non_foot_drop + floor_clearance
 
 
 # ---------------------------------------------------------------------------
@@ -686,8 +684,9 @@ class MorphologyManager:
     floor_texrepeat : checker tile density on the floor texture.
     """
 
-    def __init__(self, floor_texrepeat: int = 64):
-        self.floor_texrepeat = floor_texrepeat
+    def __init__(self, floor_texrepeat: int = 64, photorealistic: bool = False):
+        self.floor_texrepeat  = floor_texrepeat
+        self.photorealistic   = photorealistic
 
     # ------------------------------------------------------------------
     # Static helpers
@@ -962,20 +961,51 @@ class MorphologyManager:
         ET.SubElement(visual, "headlight",
             diffuse="0.7 0.7 0.7", ambient="0.3 0.3 0.3", specular="0 0 0")
 
-        # Floor assets
         asset = ET.SubElement(root, "asset")
-        ET.SubElement(asset, "texture",
-            type="2d", name="floor_tex", builtin="checker",
-            rgb1="0.3 0.3 0.3", rgb2="0.22 0.22 0.22",
-            width="512", height="512")
-        ET.SubElement(asset, "material",
-            name="floor_mat", texture="floor_tex",
-            texrepeat=f"{self.floor_texrepeat} {self.floor_texrepeat}")
+
+        if self.photorealistic:
+            # Blue-sky skybox: gradient from deep blue (top) to pale blue (horizon)
+            # with random white marks to suggest clouds.
+            ET.SubElement(asset, "texture",
+                type="skybox", builtin="gradient",
+                rgb1="0.18 0.48 0.88", rgb2="0.82 0.91 0.98",
+                width="512", height="512")
+            # Grass floor: two-tone dark green checker
+            ET.SubElement(asset, "texture",
+                type="2d", name="floor_tex", builtin="checker",
+                rgb1="0.22 0.38 0.09", rgb2="0.18 0.32 0.07",
+                width="512", height="512")
+            ET.SubElement(asset, "material",
+                name="floor_mat", texture="floor_tex",
+                texrepeat=f"{self.floor_texrepeat} {self.floor_texrepeat}",
+                shininess="0.0", specular="0.0", reflectance="0.0")
+        else:
+            ET.SubElement(asset, "texture",
+                type="2d", name="floor_tex", builtin="checker",
+                rgb1="0.3 0.3 0.3", rgb2="0.22 0.22 0.22",
+                width="512", height="512")
+            ET.SubElement(asset, "material",
+                name="floor_mat", texture="floor_tex",
+                texrepeat=f"{self.floor_texrepeat} {self.floor_texrepeat}")
 
         # World
         worldbody = ET.SubElement(root, "worldbody")
-        ET.SubElement(worldbody, "light",
-            pos="0 0 4", dir="0 0 -1", diffuse="0.8 0.8 0.8", specular="0.2 0.2 0.2")
+
+        if self.photorealistic:
+            # Sun-like directional light from upper-side angle, warm tint
+            ET.SubElement(worldbody, "light",
+                pos="5 3 8", dir="-0.5 -0.3 -1",
+                diffuse="0.95 0.90 0.75", specular="0.3 0.3 0.2",
+                directional="true", castshadow="true")
+            # Soft fill light from opposite side (sky bounce)
+            ET.SubElement(worldbody, "light",
+                pos="-3 -2 5", dir="0.3 0.2 -1",
+                diffuse="0.35 0.45 0.55", specular="0 0 0",
+                directional="true", castshadow="false")
+        else:
+            ET.SubElement(worldbody, "light",
+                pos="0 0 4", dir="0 0 -1", diffuse="0.8 0.8 0.8", specular="0.2 0.2 0.2")
+
         ET.SubElement(worldbody, "geom",
             name="floor", type="plane", size="100 100 0.1", material="floor_mat")
 

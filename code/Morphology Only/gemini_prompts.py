@@ -116,29 +116,29 @@ def build_morphology_prompt(static_target: str, dynamic_target: str) -> str:
     
     The scene:
     - 2 simultaneous views of the same morphology: left = front/side angle, right = 3/4 perspective
-    - dark/grey checkerboard floor
-    - Robot has a white cylindrical torso and colored limbs (red, yellow, green, purple...)
-    - The robot's locomotion objective: {dynamic_target}
-    - The robot's morphology objective: looking like a {static_target} (= target)
+    - checkerboard floor and sky in background
+    - Robot has a white cylindrical torso and body part, and colored limbs (red, yellow, green, purple...)
+    - The robot's locomotion objective: {dynamic_target} (= dynamic target)
+    - The robot's morphology objective: looking like a {static_target} (= static target)
     
     ═══ ANALYSIS ═══
     
     Step 1 — Factual observation
     Describe precisely what you see in both views:
-    - Torso shape, size and position relative to the ground
-    - Number of limbs, their attachment points, segment lengths and approximate angles
+    - Overall shape, size and position relative to the ground (use the left view to see if the legs touch the ground)
+    - Number of limbs, their attachment points, articulations, segment lengths and approximate angles
     - Overall stance: is the robot upright, crouching, sprawled, collapsed?
-    - Any asymmetry or unusual structural feature across the two views (shapes, connections, ..)
+    - Any asymmetry, specificity or unusual structural feature across the two views (shapes, connections, ..)
     
     Step 2 — Morphology interpretation
     You are evaluating structural design.
     Based on the static pose and limb layout:
     
     - Does the morphology resemble a {static_target}? Identify which features do or do not match.
-    - Does the structure suggest stable locomotion is even physically plausible?
-      Consider: center of mass, ground contact points, limb symmetry, joint range of motion (~90°).
+    - Does the structure suggest the dynamic target ({dynamic_target}) is even physically plausible?
+      Consider: center of mass, ground contact points, limb symmetry, limb articulation, joint range of motion (~90°).
     - If the morphology shows originality or promising structural traits, state what they are
-      and how they could support efficient locomotion.
+      and how they could support the static target and dynamic target.
     - If the morphology is poorly designed, state specifically why
       (e.g. too few contact points, limbs too short to reach ground, torso too high).
     
@@ -148,26 +148,26 @@ def build_morphology_prompt(static_target: str, dynamic_target: str) -> str:
     
     SCORING RULES:
     
-    coherence  — How well does the morphology match a {static_target}?
+    coherence  — How well does the morphology match the static target ({static_target}) ?
       0–2  = no recognizable similarity to a {static_target}
       3–4  = vague resemblance, one weak matching feature
       5–6  = partial match, 1–2 clear {static_target}-like features present
       7–8  = strong resemblance, most key features identifiable
       9–10 = unmistakable likeness, structurally faithful to a {static_target}
     
-    originality  — Is the structural design novel or inventive?
+    originality  — Is the structural design novel or inventive ?
       0–2  = generic, indistinguishable from a randomly generated MuJoCo morphology
       3–4  = basic organisation and minor variation on a standard body plan
       5–6  = one interesting structural choice (unusual limb count, asymmetry, etc.)
       7–8  = clearly novel design with multiple inventive features
       9–10 = highly creative, unexpected combination of structures
     
-    interest  — Evolutionary/locomotion potential from structural analysis alone
-      0–2  = structurally implausible: cannot stand, no viable contact points
+    interest  — Evolutionary potential from structural analysis alone
+      0–2  = structurally implausible: cannot control movement, no viable contact points
       3–4  = poor design but not hopeless; major locomotion issues likely
       5–6  = plausible but inefficient; gait would be limited or unstable, or contains many useless limb
       7–8  = solid design; structure suggests stable and potentially efficient gait
-      9–10 = excellent design; high locomotion potential, well-suited to target morphology
+      9–10 = excellent design; high control movement potential, well-suited to target morphology
     
     ═══ OUTPUT FORMAT ═══
     Respond ONLY with valid JSON, no text before or after:
@@ -221,6 +221,12 @@ GOALKEEPER_MORPH = GeminiPromptConfig(
     weights = GeminiScoringWeights(coherence=1.0, originality=0.5, interest=1.5),
 )
 
+LAMP_MORPH = GeminiPromptConfig(
+    name    = "lamp_morph",
+    target  = "lamp",
+    prompt  = build_morphology_prompt("lamp", "ergonomic and stylish lamp"),
+    weights = GeminiScoringWeights(coherence=1.0, originality=0.5, interest=1.5),
+)
 
 # ---------------------------------------------------------------------------
 # Registry
@@ -228,7 +234,7 @@ GOALKEEPER_MORPH = GeminiPromptConfig(
 
 ALL_GEMINI_PROMPT_CONFIGS: dict[str, GeminiPromptConfig] = {
     cfg.name: cfg
-    for cfg in (INSECT_MORPH, SPIDER_MORPH, CRAB_MORPH, KANGAROO_MORPH, GOALKEEPER_MORPH, CENTIPEDE_MORPH)
+    for cfg in (INSECT_MORPH, SPIDER_MORPH, CRAB_MORPH, KANGAROO_MORPH, GOALKEEPER_MORPH, CENTIPEDE_MORPH, LAMP_MORPH)
 }
 
 

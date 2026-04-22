@@ -68,7 +68,7 @@ class CameraView:
     azimuth:   float = 45.0    # degrees: 0 = front, 90 = right, 180 = back
     elevation: float = -20.0   # degrees: negative = looking down
     distance:  float = 1.8     # metres from lookat point
-    lookat:    tuple = (0.0, 0.0, 0.25)  # world-space focus point
+    lookat:    tuple = (0.0, 0.0, 0.3)  # world-space focus point
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +95,7 @@ class RenderConfig:
     debug:           bool              = False
     debug_dir:       str               = "debug_renders"
     floor_clearance: float             = 0.05   # metres of clearance above z=0
+    photorealistic:  bool              = False  # grass floor + blue-sky skybox
 
 
 # Sensible default used in __main__ and quick tests
@@ -122,7 +123,7 @@ class MorphologyRenderer:
             raise ImportError("Pillow (PIL) is required for MorphologyRenderer.")
 
         self.config   = config
-        self._manager = MorphologyManager()
+        self._manager = MorphologyManager(photorealistic=config.photorealistic)
         self._renderers: list[mujoco.Renderer] = []
         self._model:  Optional[mujoco.MjModel] = None
         self._data:   Optional[mujoco.MjData]  = None
@@ -172,6 +173,17 @@ class MorphologyRenderer:
 
         mujoco.mj_forward(self._model, self._data)
 
+        # Empirical floor snap: measure the actual lowest geom surface after
+        # physics is resolved, then translate the torso so it sits exactly at z=0.
+        # This corrects for cases where the geometric formula in compute_spawn_height
+        # is inaccurate (tilted torso, near-horizontal legs, branching effects).
+        min_bottom = self._find_min_geom_bottom()
+        if abs(min_bottom) > 1e-4:
+            root_id      = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_JOINT, "root")
+            torso_z_adr  = self._model.jnt_qposadr[root_id] + 2
+            self._data.qpos[torso_z_adr] -= min_bottom
+            mujoco.mj_forward(self._model, self._data)
+
         for _ in self.config.camera_views:
             self._renderers.append(
                 mujoco.Renderer(self._model,
@@ -187,6 +199,49 @@ class MorphologyRenderer:
             print(f"  [render] rest angles by joint (qpos_addr: value):")
             for jname, (qadr, val) in sorted(applied.items(), key=lambda x: x[1][0]):
                 print(f"    qpos[{qadr}]  {jname:<20}  {val:+.3f} rad")
+            print(f"  [render] floor snap: min_bottom={min_bottom:+.4f} m")
+
+    def _find_min_geom_bottom(self) -> float:
+        """
+        Return the world-Z of the lowest geom surface (excluding the floor plane).
+
+        For each non-plane geom:
+          - sphere:           bottom = center_z - radius
+          - capsule/cylinder: find the lower endpoint, then subtract radius
+          - other:            conservative center_z - max(size)
+
+        The result is used to shift qpos[2] so the lowest surface sits at z=0.
+        A positive return value means the robot is floating above the ground;
+        a negative value means it has already clipped through.
+        """
+        min_z = float('inf')
+        for geom_id in range(self._model.ngeom):
+            gtype = self._model.geom_type[geom_id]
+            if gtype == mujoco.mjtGeom.mjGEOM_PLANE:
+                continue
+            center = self._data.geom_xpos[geom_id]
+            size   = self._model.geom_size[geom_id]
+            if gtype == mujoco.mjtGeom.mjGEOM_SPHERE:
+                bottom = center[2] - size[0]
+            elif gtype == mujoco.mjtGeom.mjGEOM_CAPSULE:
+                # Hemispherical ends: lowest point = lower endpoint - radius.
+                rot    = self._data.geom_xmat[geom_id].reshape(3, 3)
+                axis_z = rot[2, 2]
+                p1_z   = center[2] + axis_z * size[1]
+                p2_z   = center[2] - axis_z * size[1]
+                bottom = min(p1_z, p2_z) - size[0]
+            elif gtype == mujoco.mjtGeom.mjGEOM_CYLINDER:
+                # Flat ends: lowest point = lower endpoint face center.
+                rot    = self._data.geom_xmat[geom_id].reshape(3, 3)
+                axis_z = rot[2, 2]
+                p1_z   = center[2] + axis_z * size[1]
+                p2_z   = center[2] - axis_z * size[1]
+                bottom = min(p1_z, p2_z)
+            else:
+                bottom = center[2] - float(np.max(size[:3]))
+            if bottom < min_z:
+                min_z = bottom
+        return min_z if min_z != float('inf') else 0.0
 
     def _make_camera(self, view: CameraView) -> "mujoco.MjvCamera":
         cam           = mujoco.MjvCamera()

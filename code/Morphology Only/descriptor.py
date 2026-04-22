@@ -102,28 +102,26 @@ def build_descriptor_prompt_section(config: DescriptorConfig) -> str:
     it is already going to produce, with one integer (0-10) per item.
     """
     lines = [
-        "\n    ═══ FEATURE DESCRIPTORS ═══",
-        f"    Also rate each of the following {len(config.items)} structural features (0-10).",
-        "    Add them as a top-level \"descriptors\" key in your JSON response.",
-        "    Scoring guide: 0 = not present / impossible to assess,",
-        "                   5 = moderately present,",
-        "                  10 = strongly and clearly present.",
+        "\n\n    ═══ FEATURE DESCRIPTORS ═══",
+        "",
+        "    These structural features are used to CLASSIFY the morphology along",
+        "    diversity axes in the evolutionary archive (MAP-Elites).",
+        "    Each score places the robot in a distinct region of the design space,",
+        "    so rate them accurately and independently of the fitness scores above.",
+        "    A robot can score high on fitness but low on a descriptor (or vice-versa).",
+        "",
+        f"    Rate each of the following {len(config.items)} features (integer 0-10):",
+        "    Scoring guide: 0 = not present / impossible to assess from this image,",
+        "                   5 = moderately present, medium amount",
+        "                   10 = strongly and unambiguously present / high amount",
         "",
     ]
     for item in config.items:
         lines.append(f"    {item.name}:")
         lines.append(f"      {item.question}")
 
-    lines += [
-        "",
-        "    The complete JSON must include:",
-        '    "descriptors": {',
-    ]
-    for item in config.items:
-        lines.append(f'      "{item.name}": <int 0-10>,')
-    lines.append("    }")
+    lines += ["", "    Include these ratings as a top-level \"descriptors\" key in your output JSON."]
     return "\n".join(lines)
-
 
 # ---------------------------------------------------------------------------
 # Pre-built descriptor configurations
@@ -153,25 +151,35 @@ GENERIC_DESCRIPTORS = DescriptorConfig(
             bins       = [2.5, 5.0, 7.5],
             bin_labels = ["very few limbs", "few limbs", "different limbs", "many limbs"],
         ),
+    ],
+)
+
+LAMP_DESCRIPTORS = DescriptorConfig(
+    name  = "lamp_descriptors",
+    feature_dims = ["design", "adjustability"],
+    items = [
         DescriptorItem(
-            name       = "body_complexity",
+            name       = "design",
             question   = (
-                "How structurally complex is the body plan? "
-                "Consider additional body segments, branching in limbs, unusual torso orientation. "
-                "0 = single plain torso with simple straight legs, 10 = highly complex multi-part body."
+                "How to classify the design of this lamp ? "
+                "Consider the base, the arm and the lampshade. "
+                "0-1 = small bedside lamp on stand, 2-3 = small furniture/decorating lamp, "
+                "4-5 = large furniture/decorating lamp, 6-7 = reading adjustable lamp, "
+                "8 = flashlight, 9 = experimental design, 10 = huge powerful spotlight"
             ),
-            bins       = [3.5, 7.0],
-            bin_labels = ["simple", "moderate", "complex"],
+            bins       = [1.5, 3.5, 5.5, 7.5, 8.5, 9.5],
+            bin_labels = ["bedside", "small deco", "large deco", "reading lamp", "flashlight", "experimental", "spotlight"],
         ),
         DescriptorItem(
-            name       = "ground_reach",
+            name       = "adjustability",
             question   = (
-                "How well do the limbs reach the ground? "
-                "0 = all limbs are clearly too short or angled away, limbs cannot touch ground, "
-                "10 = all limbs reach the ground stably."
+                "How much can the robot-lamp adjust its position or light orientation? "
+                "0-2 = totally fixed, no articulation, 3-5 = basic adjustability (poor articulation), "
+                "6-7 = clear articulation that allows adjustment, "
+                "8-10 = good or clever articulation to adjust the lamp"
             ),
-            bins       = [4.0, 7.0],
-            bin_labels = ["poor reach", "partial reach", "good reach"],
+            bins       = [2.5, 5.5, 7.5],
+            bin_labels = ["fixed", "basic adjustment", "good mechanism", "great mechanism"],
         ),
     ],
 )
@@ -183,7 +191,7 @@ GENERIC_DESCRIPTORS = DescriptorConfig(
 
 ALL_DESCRIPTOR_CONFIGS: dict[str, DescriptorConfig] = {
     cfg.name: cfg
-    for cfg in (GENERIC_DESCRIPTORS,)
+    for cfg in (GENERIC_DESCRIPTORS, LAMP_DESCRIPTORS,)
 }
 
 
