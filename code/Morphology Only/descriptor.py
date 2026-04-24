@@ -184,6 +184,41 @@ LAMP_DESCRIPTORS = DescriptorConfig(
     ],
 )
 
+ELEPHANT_DESCRIPTORS = DescriptorConfig(
+    name  = "elephant_descriptors",
+    feature_dims = ["overall looking", "trunk type"],
+    items = [
+        DescriptorItem(
+            name       = "overall looking",
+            question   = (
+                "How to classify the design of this elephant-like robot ? "
+                "Consider the body parts, the arms, its characteristic and the gait. "
+                "0-1 = A legged-robot with only one elephant feature (trunk, large ears, tusk, large body),"
+                "2-3 = Only an elephant-like trunk on a support"
+                "4-5 = Only the head is identifiable (trunk, ears, tusk),"
+                "6-7 = Only the body is identifiable (large body, 4 legs, big feet),"
+                "8-9 = A large four-legged animal with an elephant head and clear features, "
+                "10 =  An elephant-inspired robot that grab and manipulate objects  "
+            ),
+            bins       = [1.5, 3.5, 5.5, 7.5, 9.5],
+            bin_labels = ["one feature", "trunk only", "head only", "body only", "elephant", "robotic"],
+        ),
+        DescriptorItem(
+            name       = "trunk type",
+            question   = (
+                "How too characterized the elephant-like trunk ? "
+                "0-1 = no clear trunk identifiable, "
+                "2-3 = weird trunk with clumsy shape (too much twisted, folded, locked), "
+                "4-5 = basic trunk-like shape, basic articulation, "
+                "6-7 = great articulated elephant-like trunk with great moving clearance, "
+                "8-10 = a robotic shape trunk with special mechanism like gripper or suction cup"
+            ),
+            bins       = [1.5, 3.5, 5.5, 7.5],
+            bin_labels = ["no trunk", "clumsy trunk", "basic trunk", "great trunk", "robotic trunk"],
+        ),
+    ],
+)
+
 
 # ---------------------------------------------------------------------------
 # Registry
@@ -191,7 +226,7 @@ LAMP_DESCRIPTORS = DescriptorConfig(
 
 ALL_DESCRIPTOR_CONFIGS: dict[str, DescriptorConfig] = {
     cfg.name: cfg
-    for cfg in (GENERIC_DESCRIPTORS, LAMP_DESCRIPTORS,)
+    for cfg in (GENERIC_DESCRIPTORS, LAMP_DESCRIPTORS, ELEPHANT_DESCRIPTORS)
 }
 
 

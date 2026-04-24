@@ -73,7 +73,7 @@ class ExperimentConfig:
 
     # ---- Identity -----------------------------------------------------------
     run_id:          str = ""            # filled automatically if empty
-    seed:            int = 35
+    seed:            int = 31
     description:     str = ""
     strategy:        str = "map_elite"   # "mu_lambda" | "map_elite"
 
@@ -90,7 +90,7 @@ class ExperimentConfig:
     # init_population_size : number of random individuals evaluated at gen 0.
     #   mu_lambda  → defaults to mu  if 0
     #   map_elite  → defaults to max(mu, lambda_) * 2  if 0
-    init_population_size: int = lambda_ + sigma
+    init_population_size: int = 2 * (lambda_ + sigma)
 
     # Range of leg count for randomly generated morphologies (structure, not count)
     init_n_legs_min: int = 1
@@ -107,13 +107,15 @@ class ExperimentConfig:
     allow_branching:  bool  = True        # whether mutation can create branched legs
     branching_prob:   float = 0.6        # conditional prob of adding a branched leg
     # Torso mutation (0.0 = keep fixed, i.e. torso shape/orientation unchanged)
-    torso_radius_std: float = 0.05         # Gaussian std for torso radius (m)
-    torso_height_std: float = 0.05         # Gaussian std for torso half-height (m)
-    torso_euler_std:  float = 5.0         # Gaussian std per euler axis (degrees)
+    torso_a_std:      float = 0.05         # Gaussian std for torso X semi-axis (m)
+    torso_b_std:      float = 0.05         # Gaussian std for torso Y semi-axis (m)
+    torso_c_std:      float = 0.05         # Gaussian std for torso Z semi-axis (m)
+    torso_euler_std:  float = 5.0          # Gaussian std per euler axis (degrees)
     # Body part mutation
     add_remove_body_part_prob: float = 0.25  # prob of adding/removing a body part (0 = disabled)
-    body_part_radius_std:      float = 0.02
-    body_part_height_std:      float = 0.01
+    body_part_a_std:           float = 0.02
+    body_part_b_std:           float = 0.02
+    body_part_c_std:           float = 0.01
     body_part_euler_std:       float = 5.0
     body_part_leg_prob:        float = 0.5  # when adding a leg, prob of attaching to a body part
 
@@ -150,11 +152,11 @@ class ExperimentConfig:
     batching:        int = 20
 
     # ---- Prompt -------------------------------------------------------------
-    prompt_name:     str = "lamp_morph"
+    prompt_name:     str = "kangaroo_morph"
 
     # ---- Descriptor (VLM-based MapElite feature assessment) -----------------
     # Name of a DescriptorConfig from descriptor.py; "" = structural-only mode.
-    descriptor_config_name: str = "lamp_descriptors"
+    descriptor_config_name: str = "generic_descriptors"
 
     # ---- Output -------------------------------------------------------------
     output_dir:            str  = "results"
@@ -219,8 +221,8 @@ class ExperimentConfig:
         print(f"  mutation     : length_std={self.length_std}  angle_std={self.angle_std}  "
               f"rest_angle_std={self.rest_angle_std}")
         print(f"  add_remove   : {self.add_remove_prob:.0%}  branching={self.allow_branching} ({self.branching_prob:.0%})")
-        print(f"  torso mut    : radius_std={self.torso_radius_std}  height_std={self.torso_height_std}  "
-              f"euler_std={self.torso_euler_std}°")
+        print(f"  torso mut    : a_std={self.torso_a_std}  b_std={self.torso_b_std}  "
+              f"c_std={self.torso_c_std}  euler_std={self.torso_euler_std}°")
         print(f"  seed         : {self.seed}")
         if self.grader_type == "clip":
             print(f"  grader       : {self.clip_model}  method={self.scoring_method}  "

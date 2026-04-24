@@ -672,9 +672,9 @@ class GeminiGrader(MorphologyGrader):
             "{\n"
             '      "observation":    "factual description of what you see",\n'
             '      "interpretation": "structural interpretation relative to the target",\n'
-            '      "coherence":      { "score": <int 0-10>, "reason": "..." },\n'
-            '      "originality":    { "score": <int 0-10>, "reason": "..." },\n'
-            '      "interest":       { "score": <int 0-10>, "reason": "..." }'
+            '      "coherence":      { "score": <int 0-100>, "reason": "..." },\n'
+            '      "originality":    { "score": <int 0-100>, "reason": "..." },\n'
+            '      "interest":       { "score": <int 0-100>, "reason": "..." }'
             + (f',\n{desc_schema}' if desc_schema else "")
             + "\n    }"
         )
@@ -686,16 +686,15 @@ class GeminiGrader(MorphologyGrader):
     ═══ REFERENCE IMAGE ═══
 
     The first image labeled "reference" shows the CURRENT BEST-PERFORMING robot from the previous generation.
-    It is provided as a contextual baseline ONLY.
+    It is provided as a contextual baseline ONLY for comparison.
     — Do NOT score the reference. Do NOT include "reference" as a key in your JSON output.
-    — Your goal is NOT to reward morphologies that merely look like the reference.
-    Instead, use the reference to better identify and reward:
+    — The reference is likely to not be far from great, and may be improve a lot. Do not take it as a "great" reference, take it as a starting point for comparison and improvement. 
+    Use the reference to better identify and reward:
       • Genuine structural novelty: designs clearly different from the reference in limb count,
         body plan, attachment points, or overall stance.
       • Real improvement: morphologies that address visible weaknesses of the reference
-        (e.g. better ground contact, more coherent body plan, more {self._prompt_config.target}-like structure).
+        (e.g. better ground contact, better simplicity / efficiency, more coherent body plan, more {self._prompt_config.target}-like structure).
       • Interesting new traits the reference does not have.
-    If a candidate robot is merely a minor variant of the reference, do not inflate its scores.
             """
 
         return f"""
@@ -718,7 +717,7 @@ class GeminiGrader(MorphologyGrader):
         """Convert one dict entry from a batch response into a GraderOutput."""
         def _score(key):
             val = parsed.get(key, {})
-            return float(val.get("score", 0) if isinstance(val, dict) else val)
+            return (float(val.get("score", 0) if isinstance(val, dict) else val)) / 10
 
         def _reason(key):
             val = parsed.get(key, {})
@@ -833,11 +832,11 @@ class GeminiGrader(MorphologyGrader):
         parsed = json.loads(stripped[start:end])
 
         # --- Extract scores ---
-        def _extract_score(key: str) -> float:
+        def _extract_score(key: str, scale: int = 100) -> float:
             val = parsed.get(key, {})
             if isinstance(val, dict):
-                return float(val.get("score", 0))
-            return float(val)
+                return float(val.get("score", 0)) / scale
+            return float(val) / scale
 
         coherence   = _extract_score("coherence")
         originality = _extract_score("originality")

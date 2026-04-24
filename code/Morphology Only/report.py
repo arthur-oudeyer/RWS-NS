@@ -118,8 +118,8 @@ def _format_entry(rank: int, entry: dict, total: int) -> str:
     n_bp    = desc.get("n_body_parts", "?")
     sym     = desc.get("symmetry_score", "?")
     seg     = desc.get("mean_segment_length", "?")
-    tr      = desc.get("torso_radius", "?")
-    th      = desc.get("torso_height", "?")
+    tr      = desc.get("torso_a", desc.get("torso_radius", "?"))
+    th      = desc.get("torso_c", desc.get("torso_height", "?"))
     lines.append(
         f"  Morpho   : legs={n_legs} (root={n_root} branch={n_br} bparts={n_bp})  "
         f"sym={sym:.3f}  seg_len={seg:.3f} m"
@@ -127,7 +127,7 @@ def _format_entry(rank: int, entry: dict, total: int) -> str:
         else f"  Morpho   : legs={n_legs}  root={n_root}  branch={n_br}  bparts={n_bp}"
     )
     if isinstance(tr, float) and isinstance(th, float):
-        lines.append(f"  Torso    : radius={tr:.3f} m  half-height={th:.3f} m")
+        lines.append(f"  Torso    : a={tr:.3f} m  c={th:.3f} m")
 
     if rpath:
         lines.append(f"  Render   : {rpath}")

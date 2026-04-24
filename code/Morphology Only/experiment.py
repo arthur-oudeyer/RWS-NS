@@ -36,6 +36,7 @@ from __future__ import annotations
 import json
 import shutil
 import sys, os
+import threading
 import time
 from pathlib import Path
 from typing import Optional, Union
@@ -60,6 +61,62 @@ except ImportError:
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from api_keys import APIKEY_GEMINI
+
+# ---------------------------------------------------------------------------
+# Live evaluation timer
+# ---------------------------------------------------------------------------
+
+_SEC_PER_ROBOT = 6.0  # Gemini batch latency estimate
+
+
+class _LiveTimer:
+    """Context manager that shows elapsed / estimated time during batch evaluation.
+
+    In a TTY: rewrites a single progress-bar line every 0.5 s using \\r.
+    Not a TTY: prints the header only (avoids polluting log files).
+
+    Usage::
+        with _LiveTimer(n_robots, generation, n_generations):
+            results = evo.step(...)
+    """
+
+    _BAR_W = 24
+
+    def __init__(self, n_robots: int, generation: int, n_generations: int):
+        self._est    = n_robots * _SEC_PER_ROBOT
+        self._header = (
+            f"[gen {generation:>3} / {n_generations}]  "
+            f"evaluating {n_robots} robots  (~{self._est:.0f}s estimated)"
+        )
+        self._stop   = threading.Event()
+        self._t0: float = 0.0
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def __enter__(self):
+        print(self._header, flush=True)
+        self._t0 = time.perf_counter()
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_):
+        self._stop.set()
+        self._thread.join()
+        # Erase the progress line; _print_progress writes the final stats next
+        print(f"\r{' ' * 78}\r", end="", flush=True)
+
+    def _run(self):
+        while not self._stop.is_set():
+            elapsed = time.perf_counter() - self._t0
+            frac    = min(elapsed / self._est, 0.99) if self._est > 0 else 0.0
+            filled  = int(frac * self._BAR_W)
+            bar     = "█" * filled + "░" * (self._BAR_W - filled)
+            line    = (
+                f"  [{bar}] {frac * 100:3.0f}%"
+                f"  {elapsed:6.1f}s / ~{self._est:.0f}s"
+            )
+            print(f"\r{line}", end="", flush=True)
+            self._stop.wait(0.5)
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -306,14 +363,16 @@ def run(
 
     print(f"[experiment] Starting experiment with random individuals...")
     # ---- Generation 0: initialise -------------------------------------------
+    n_init = getattr(cfg, "init_population_size", 0) or cfg.mu
     t0 = time.perf_counter()
-    init_results, id_counter = evo.initialise(
-        renderer     = renderer,
-        grader       = grader,
-        id_counter   = 0,
-        save_renders = save_renders,
-        render_dir   = str(run_dir / "renders" / "gen0000") if save_renders else None,
-    )
+    with _LiveTimer(n_init, 0, cfg.n_generations):
+        init_results, id_counter = evo.initialise(
+            renderer     = renderer,
+            grader       = grader,
+            id_counter   = 0,
+            save_renders = save_renders,
+            render_dir   = str(run_dir / "renders" / "gen0000") if save_renders else None,
+        )
     archive.update(init_results)
     elapsed = time.perf_counter() - t0
     _log_individuals(indiv_log_path, init_results)
@@ -327,23 +386,24 @@ def run(
         _save_best_render(archive, renderer, run_dir, f"best/gen{0:04d}")
 
     # ---- Evolution loop ------------------------------------------------------
+    n_step = cfg.lambda_ + getattr(cfg, "sigma", 0)
     for generation in range(1, cfg.n_generations + 1):
-        t0 = time.perf_counter()
-
         gen_render_dir = (
             str(run_dir / "renders" / f"gen{generation:04d}")
             if save_renders else None
         )
+        t0 = time.perf_counter()
         prev_id = id_counter
-        results, id_counter = evo.step(
-            archive      = archive,
-            renderer     = renderer,
-            grader       = grader,
-            generation   = generation,
-            id_counter   = id_counter,
-            save_renders = save_renders,
-            render_dir   = gen_render_dir,
-        )
+        with _LiveTimer(n_step, generation, cfg.n_generations):
+            results, id_counter = evo.step(
+                archive      = archive,
+                renderer     = renderer,
+                grader       = grader,
+                generation   = generation,
+                id_counter   = id_counter,
+                save_renders = save_renders,
+                render_dir   = gen_render_dir,
+            )
         archive.update(results)
         elapsed = time.perf_counter() - t0
         # Only log truly new individuals (offspring), not re-tagged parents
@@ -442,23 +502,24 @@ def resume(
 
     print("[experiment] Done, loop restarted.")
     # Resume loop
+    n_step = cfg.lambda_ + getattr(cfg, "sigma", 0)
     for generation in range(start_gen, cfg.n_generations + 1):
-        t0 = time.perf_counter()
-
         gen_render_dir = (
             str(run_dir / "renders" / f"gen{generation:04d}")
             if save_renders else None
         )
+        t0 = time.perf_counter()
         prev_id = id_counter
-        results, id_counter = evo.step(
-            archive      = archive,
-            renderer     = renderer,
-            grader       = grader,
-            generation   = generation,
-            id_counter   = id_counter,
-            save_renders = save_renders,
-            render_dir   = gen_render_dir,
-        )
+        with _LiveTimer(n_step, generation, cfg.n_generations):
+            results, id_counter = evo.step(
+                archive      = archive,
+                renderer     = renderer,
+                grader       = grader,
+                generation   = generation,
+                id_counter   = id_counter,
+                save_renders = save_renders,
+                render_dir   = gen_render_dir,
+            )
         archive.update(results)
         elapsed = time.perf_counter() - t0
         _log_individuals(indiv_log_path, [r for r in results if r.individual_id >= prev_id])

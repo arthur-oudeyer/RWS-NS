@@ -103,9 +103,9 @@ def build_morphology_prompt(static_target: str, dynamic_target: str) -> str:
     {
       "observation":    "factual description",
       "interpretation": "interpretation description and explanation",
-      "coherence":      { "score": <int 0-10>, "reason": "..." },
-      "originality":    { "score": <int 0-10>, "reason": "..." },
-      "interest":       { "score": <int 0-10>, "reason": "..." }
+      "coherence":      { "score": <int 0-100>, "reason": "..." },
+      "originality":    { "score": <int 0-100>, "reason": "..." },
+      "interest":       { "score": <int 0-100>, "reason": "..." }
     }"""
 
     return f"""
@@ -144,30 +144,31 @@ def build_morphology_prompt(static_target: str, dynamic_target: str) -> str:
     
     Step 3 — Score
     Score each dimension using only the static image evidence.
-    Be conservative. Do not infer runtime behavior from a single frame.
+    Be conservative. Do not infer runtime behavior from a single frame. 
+    Avoid OVERGRADING, let space for better morphology further improvement (A medium morphology cannot have more the ~60/100 in overall).
     
     SCORING RULES:
     
     coherence  — How well does the morphology match the static target ({static_target}) ?
-      0–2  = no recognizable similarity to a {static_target}
-      3–4  = vague resemblance, one weak matching feature
-      5–6  = partial match, 1–2 clear {static_target}-like features present
-      7–8  = strong resemblance, most key features identifiable
-      9–10 = unmistakable likeness, structurally faithful to a {static_target}
+      0–29   = no recognizable similarity to a {static_target}
+      30–49  = vague resemblance, one weak matching feature
+      50–69  = partial match, 1–2 clear {static_target}-like features present
+      70–89  = strong resemblance, most key features identifiable
+      90–100 = unmistakable likeness, structurally faithful to a {static_target}
     
     originality  — Is the structural design novel or inventive ?
-      0–2  = generic, indistinguishable from a randomly generated MuJoCo morphology
-      3–4  = basic organisation and minor variation on a standard body plan
-      5–6  = one interesting structural choice (unusual limb count, asymmetry, etc.)
-      7–8  = clearly novel design with multiple inventive features
-      9–10 = highly creative, unexpected combination of structures
+      0–29   = generic, indistinguishable from a randomly generated MuJoCo morphology
+      30–49  = basic organisation and minor variation on a standard body plan
+      50–69  = one interesting structural choice (unusual limb count, asymmetry, etc.)
+      70–89  = clearly novel design with multiple inventive features
+      90–100 = highly creative, unexpected combination of structures
     
     interest  — Evolutionary potential from structural analysis alone
-      0–2  = structurally implausible: cannot control movement, no viable contact points
-      3–4  = poor design but not hopeless; major locomotion issues likely
-      5–6  = plausible but inefficient; gait would be limited or unstable, or contains many useless limb
-      7–8  = solid design; structure suggests stable and potentially efficient gait
-      9–10 = excellent design; high control movement potential, well-suited to target morphology
+      0–29   = structurally implausible: cannot control movement, no viable contact points
+      30–49  = poor design but not hopeless; major locomotion issues likely
+      50–69  = plausible but inefficient; gait would be limited or unstable, or contains many useless limb
+      70–89  = solid design; structure suggests stable and potentially efficient gait
+      90–100 = excellent design; high control movement potential, well-suited to target morphology
     
     ═══ OUTPUT FORMAT ═══
     Respond ONLY with valid JSON, no text before or after:
@@ -214,6 +215,13 @@ KANGAROO_MORPH = GeminiPromptConfig(
     weights = GeminiScoringWeights(coherence=1.0, originality=0.5, interest=1.5),
 )
 
+ELEPHANT_MORPH = GeminiPromptConfig(
+    name    = "elephant_morph",
+    target  = "elephant",
+    prompt  = build_morphology_prompt("elephant", "grabbing and carrying small object"),
+    weights = GeminiScoringWeights(coherence=1.0, originality=0.5, interest=1.5),
+)
+
 GOALKEEPER_MORPH = GeminiPromptConfig(
     name    = "goal_keeper_morph",
     target  = "humanoid",
@@ -234,7 +242,7 @@ LAMP_MORPH = GeminiPromptConfig(
 
 ALL_GEMINI_PROMPT_CONFIGS: dict[str, GeminiPromptConfig] = {
     cfg.name: cfg
-    for cfg in (INSECT_MORPH, SPIDER_MORPH, CRAB_MORPH, KANGAROO_MORPH, GOALKEEPER_MORPH, CENTIPEDE_MORPH, LAMP_MORPH)
+    for cfg in (INSECT_MORPH, SPIDER_MORPH, CRAB_MORPH, KANGAROO_MORPH, GOALKEEPER_MORPH, CENTIPEDE_MORPH, LAMP_MORPH, ELEPHANT_MORPH)
 }
 
 

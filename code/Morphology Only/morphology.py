@@ -5,7 +5,7 @@ Robot morphology descriptors and MuJoCo XML generator for the
 morphology-only experiment.
 
 A robot body is described by a RobotMorphology dataclass:
-  - a torso (cylinder)
+  - a torso (ellipsoid)
   - a list of LegDescriptors, each with a list of JointDescriptors
 
 Legs can be attached to the torso (root legs) or to the end of a
@@ -110,7 +110,7 @@ class LegDescriptor:
 @dataclass
 class BodyPartDescriptor:
     """
-    A secondary cylindrical body rigidly attached at the tip of a parent leg.
+    A secondary ellipsoidal body rigidly attached at the tip of a parent leg.
 
     Body parts act as structural nodes from which additional root legs can
     spawn, enabling multi-segment body plans (e.g. insect thorax+abdomen).
@@ -123,15 +123,17 @@ class BodyPartDescriptor:
                      segment tip this body part attaches to.
                      Must be < any leg that references this body part via
                      body_part_idx, so the MJCF can be built in one pass.
-    radius         : cylinder radius (m).
-    height         : cylinder half-height (m).
+    a              : ellipsoid X semi-axis (m).
+    b              : ellipsoid Y semi-axis (m).
+    c              : ellipsoid Z semi-axis (m).
     euler_deg      : (roll, pitch, yaw) orientation relative to the parent
                      leg's tip frame, in degrees.
     rgba           : RGBA colour.
     """
     parent_leg_idx: int
-    radius:         float = 0.08
-    height:         float = 0.03
+    a:              float = 0.08
+    b:              float = 0.08
+    c:              float = 0.03
     euler_deg:      tuple = field(default_factory=lambda: (0., 0., 0.))
     rgba:           tuple = field(default_factory=lambda: (0.75, 0.75, 0.75, 1.0))
 
@@ -145,8 +147,9 @@ class RobotMorphology:
     name:          str
     legs:          list[LegDescriptor]
     body_parts:    list[BodyPartDescriptor] = field(default_factory=list)
-    torso_radius:  float = 0.12
-    torso_height:  float = 0.04
+    torso_a:       float = 0.12   # ellipsoid X semi-axis (m)
+    torso_b:       float = 0.12   # ellipsoid Y semi-axis (m)
+    torso_c:       float = 0.04   # ellipsoid Z semi-axis (m)
     torso_rgba:    tuple = (0.9, 0.9, 0.9, 1.0)
     torso_euler:   tuple = (0.0, 0.0, 0.0)   # roll, pitch, yaw (degrees) of the torso body
     spawn_height:  float = 0.5
@@ -213,8 +216,9 @@ class RobotMorphology:
             "total_segment_length": round(sum(all_lengths), 4) if all_lengths else 0.0,
             "mean_segment_length":  round(float(np.mean(all_lengths)), 4) if all_lengths else 0.0,
             "max_segment_length":   round(float(max(all_lengths)), 4) if all_lengths else 0.0,
-            "torso_radius":         self.torso_radius,
-            "torso_height":         self.torso_height,
+            "torso_a":              self.torso_a,
+            "torso_b":              self.torso_b,
+            "torso_c":              self.torso_c,
             "torso_euler":          list(self.torso_euler),
         }
 
@@ -251,7 +255,8 @@ HEXAPOD = RobotMorphology(
         LegDescriptor(270.0, [JointDescriptor(rgba=(0.8, 0.3, 0.3, 1.0))]),
         LegDescriptor(330.0, [JointDescriptor(rgba=(0.8, 0.6, 0.3, 1.0))]),
     ],
-    torso_radius=0.14,
+    torso_a=0.14,
+    torso_b=0.14,
 )
 
 # ---------------------------------------------------------------------------
@@ -272,7 +277,7 @@ def compute_spawn_height(morph: RobotMorphology, floor_clearance: float = 0.05) 
     The calculation uses the rest-pose geometry:
       - Each leg segment with rest_angle α and length L drops by L·cos(α).
       - Drops along a chain accumulate additively.
-      - Body parts at leg tips extend the drop by the body part's half-height.
+      - Body parts at leg tips extend the drop by the body part's Z semi-axis (c).
       - Leg tips end in a foot sphere of radius foot_radius.
 
     Parameters
@@ -291,7 +296,7 @@ def compute_spawn_height(morph: RobotMorphology, floor_clearance: float = 0.05) 
     }
 
     # Torso bottom and body parts need clearance; feet do not.
-    non_foot_drop: float = morph.torso_height
+    non_foot_drop: float = morph.torso_c
     foot_drop:     float = 0.0
     has_terminal_leg:    bool  = False
 
@@ -312,7 +317,7 @@ def compute_spawn_height(morph: RobotMorphology, floor_clearance: float = 0.05) 
             bp_idx = body_part_at_leg[leg_idx]
             bp = morph.body_parts[bp_idx]
             body_part_z[bp_idx] = tip_z
-            non_foot_drop = max(non_foot_drop, -tip_z + bp.height)
+            non_foot_drop = max(non_foot_drop, -tip_z + bp.c)
         else:
             has_terminal_leg = True
             foot_drop = max(foot_drop, -tip_z + morph.foot_radius)
@@ -333,7 +338,7 @@ def NewMorph(
     n_legs:       int   = 0,
     min_init_legs: int   = 2,
     max_init_legs: int   = 6,
-    torso_radius: float = 0.12,
+    torso_a:      float = 0.12,
     n_init_mutation: int = cfg.ExperimentConfig.init_n_mutation,
 ) -> RobotMorphology:
     """
@@ -352,7 +357,7 @@ def NewMorph(
         rest_angle  = float(np.random.uniform(-0.6, 0.4))   # within typical ctrl_range
         legs.append(LegDescriptor(angle, [JointDescriptor(rgba=color, length=length, rest_angle=rest_angle)]))
 
-    morph = RobotMorphology(name=name, legs=legs, torso_radius=torso_radius)
+    morph = RobotMorphology(name=name, legs=legs, torso_a=torso_a)
     for _ in range(n_init_mutation):
         morph = MutateMorphology(morph)
     return morph
@@ -370,12 +375,14 @@ def MutateMorphology(
     add_remove_prob:           float = cfg.ExperimentConfig.add_remove_prob,
     allow_branching:           bool  = cfg.ExperimentConfig.allow_branching,
     branching_prob:            float = cfg.ExperimentConfig.branching_prob,
-    torso_radius_std:          float = cfg.ExperimentConfig.torso_radius_std,
-    torso_height_std:          float = cfg.ExperimentConfig.torso_height_std,
+    torso_a_std:               float = cfg.ExperimentConfig.torso_a_std,
+    torso_b_std:               float = cfg.ExperimentConfig.torso_b_std,
+    torso_c_std:               float = cfg.ExperimentConfig.torso_c_std,
     torso_euler_std:           float = cfg.ExperimentConfig.torso_euler_std,
     add_remove_body_part_prob: float = cfg.ExperimentConfig.add_remove_body_part_prob,
-    body_part_radius_std:      float = cfg.ExperimentConfig.body_part_radius_std,
-    body_part_height_std:      float = cfg.ExperimentConfig.body_part_height_std,
+    body_part_a_std:           float = cfg.ExperimentConfig.body_part_a_std,
+    body_part_b_std:           float = cfg.ExperimentConfig.body_part_b_std,
+    body_part_c_std:           float = cfg.ExperimentConfig.body_part_c_std,
     body_part_euler_std:       float = cfg.ExperimentConfig.body_part_euler_std,
     body_part_leg_prob:        float = cfg.ExperimentConfig.body_part_leg_prob,
     rng:                       Optional[np.random.Generator] = None,
@@ -390,13 +397,15 @@ def MutateMorphology(
     add_remove_prob           : probability of adding or removing one leg.
     allow_branching           : allow new legs to branch off another leg's joint.
     branching_prob            : conditional probability of branching when adding.
-    torso_radius_std          : std dev for torso radius.  0 = fixed.
-    torso_height_std          : std dev for torso half-height.  0 = fixed.
+    torso_a_std               : std dev for torso X semi-axis.  0 = fixed.
+    torso_b_std               : std dev for torso Y semi-axis.  0 = fixed.
+    torso_c_std               : std dev for torso Z semi-axis.  0 = fixed.
     torso_euler_std           : std dev (deg) per euler axis.  0 = fixed.
     add_remove_body_part_prob : probability of adding or removing one body part.
                                 0 = body parts are never mutated (default).
-    body_part_radius_std      : std dev for body part radius.  0 = fixed.
-    body_part_height_std      : std dev for body part height.  0 = fixed.
+    body_part_a_std           : std dev for body part X semi-axis.  0 = fixed.
+    body_part_b_std           : std dev for body part Y semi-axis.  0 = fixed.
+    body_part_c_std           : std dev for body part Z semi-axis.  0 = fixed.
     body_part_euler_std       : std dev (deg) per euler axis for body parts.
     body_part_leg_prob        : when adding a new leg, probability of attaching
                                 it to a random body part (if any exist) rather
@@ -501,8 +510,9 @@ def MutateMorphology(
                           1.0)
             new.body_parts.append(BodyPartDescriptor(
                 parent_leg_idx = parent_idx,
-                radius         = float(rng.uniform(0.04, 0.14)),
-                height         = float(rng.uniform(0.01, 0.08)),
+                a              = float(rng.uniform(0.04, 0.14)),
+                b              = float(rng.uniform(0.04, 0.14)),
+                c              = float(rng.uniform(0.01, 0.08)),
                 rgba           = bp_color,
             ))
         elif can_remove:
@@ -532,13 +542,17 @@ def MutateMorphology(
             ))
 
     # ── Perturb torso ────────────────────────────────────────────────────────
-    if torso_radius_std > 0:
-        new.torso_radius = float(np.clip(
-            new.torso_radius + rng.normal(0, torso_radius_std), 0.05, 0.30,
+    if torso_a_std > 0:
+        new.torso_a = float(np.clip(
+            new.torso_a + rng.normal(0, torso_a_std), 0.05, 0.30,
         ))
-    if torso_height_std > 0:
-        new.torso_height = float(np.clip(
-            new.torso_height + rng.normal(0, torso_height_std), 0.01, 0.25,
+    if torso_b_std > 0:
+        new.torso_b = float(np.clip(
+            new.torso_b + rng.normal(0, torso_b_std), 0.05, 0.30,
+        ))
+    if torso_c_std > 0:
+        new.torso_c = float(np.clip(
+            new.torso_c + rng.normal(0, torso_c_std), 0.01, 0.25,
         ))
     if torso_euler_std > 0:
         rx, ry, rz = new.torso_euler
@@ -550,13 +564,17 @@ def MutateMorphology(
 
     # ── Perturb body parts ───────────────────────────────────────────────────
     for bp in new.body_parts:
-        if body_part_radius_std > 0:
-            bp.radius = float(np.clip(
-                bp.radius + rng.normal(0, body_part_radius_std), 0.03, 0.25,
+        if body_part_a_std > 0:
+            bp.a = float(np.clip(
+                bp.a + rng.normal(0, body_part_a_std), 0.03, 0.25,
             ))
-        if body_part_height_std > 0:
-            bp.height = float(np.clip(
-                bp.height + rng.normal(0, body_part_height_std), 0.01, 0.15,
+        if body_part_b_std > 0:
+            bp.b = float(np.clip(
+                bp.b + rng.normal(0, body_part_b_std), 0.03, 0.25,
+            ))
+        if body_part_c_std > 0:
+            bp.c = float(np.clip(
+                bp.c + rng.normal(0, body_part_c_std), 0.01, 0.15,
             ))
         if body_part_euler_std > 0:
             rx, ry, rz = bp.euler_deg
@@ -576,19 +594,21 @@ def MutateMorphology(
 def morphology_to_dict(morph: RobotMorphology) -> dict:
     """Convert a RobotMorphology to a plain dict safe for JSON/pickle."""
     return {
-        "name":          morph.name,
-        "torso_radius":  morph.torso_radius,
-        "torso_height":  morph.torso_height,
-        "torso_rgba":    list(morph.torso_rgba),
-        "torso_euler":   list(morph.torso_euler),
-        "spawn_height":  morph.spawn_height,
-        "foot_radius":   morph.foot_radius,
-        "foot_rgba":     list(morph.foot_rgba),
+        "name":        morph.name,
+        "torso_a":     morph.torso_a,
+        "torso_b":     morph.torso_b,
+        "torso_c":     morph.torso_c,
+        "torso_rgba":  list(morph.torso_rgba),
+        "torso_euler": list(morph.torso_euler),
+        "spawn_height": morph.spawn_height,
+        "foot_radius":  morph.foot_radius,
+        "foot_rgba":    list(morph.foot_rgba),
         "body_parts": [
             {
                 "parent_leg_idx": bp.parent_leg_idx,
-                "radius":         bp.radius,
-                "height":         bp.height,
+                "a":              bp.a,
+                "b":              bp.b,
+                "c":              bp.c,
                 "euler_deg":      list(bp.euler_deg),
                 "rgba":           list(bp.rgba),
             }
@@ -626,8 +646,9 @@ def dict_to_morphology(d: dict) -> RobotMorphology:
     body_parts = [
         BodyPartDescriptor(
             parent_leg_idx = bp["parent_leg_idx"],
-            radius         = bp["radius"],
-            height         = bp["height"],
+            a              = bp.get("a", bp.get("radius", 0.08)),
+            b              = bp.get("b", bp.get("a", bp.get("radius", 0.08))),
+            c              = bp.get("c", bp.get("height", 0.03)),
             euler_deg      = tuple(bp.get("euler_deg", [0., 0., 0.])),
             rgba           = tuple(bp.get("rgba", [0.75, 0.75, 0.75, 1.0])),
         )
@@ -654,12 +675,14 @@ def dict_to_morphology(d: dict) -> RobotMorphology:
         )
         for leg in d["legs"]
     ]
+    _old_r = d.get("torso_radius", 0.12)
     return RobotMorphology(
         name         = d["name"],
         legs         = legs,
         body_parts   = body_parts,
-        torso_radius = d["torso_radius"],
-        torso_height = d["torso_height"],
+        torso_a      = d.get("torso_a", _old_r),
+        torso_b      = d.get("torso_b", d.get("torso_a", _old_r)),
+        torso_c      = d.get("torso_c", d.get("torso_height", 0.04)),
         torso_rgba   = tuple(d["torso_rgba"]),
         torso_euler  = tuple(d.get("torso_euler", [0.0, 0.0, 0.0])),
         spawn_height = d["spawn_height"],
@@ -706,12 +729,12 @@ class MorphologyManager:
         return (-math.sin(r), math.cos(r), 0.0)
 
     @staticmethod
-    def _rim_pos(angle_deg: float, torso_radius: float) -> tuple[float, float, float]:
-        """XYZ position on the torso rim at the given angle."""
+    def _rim_pos(angle_deg: float, a: float, b: float) -> tuple[float, float, float]:
+        """XYZ position on the ellipsoidal equatorial rim at the given angle."""
         r = math.radians(angle_deg)
         return (
-            round(math.cos(r) * torso_radius, 5),
-            round(math.sin(r) * torso_radius, 5),
+            round(math.cos(r) * a, 5),
+            round(math.sin(r) * b, 5),
             0.0,
         )
 
@@ -837,8 +860,8 @@ class MorphologyManager:
 
         ET.SubElement(bp_body, "geom",
             name     = f"{prefix}bpart{bp_idx + 1}_geom",
-            type     = "cylinder",
-            size     = f"{bp.radius} {bp.height}",
+            type     = "ellipsoid",
+            size     = f"{bp.a} {bp.b} {bp.c}",
             rgba     = self._rgba(bp.rgba),
             condim   = "3",
             friction = "0.7 0.005 0.0001",
@@ -879,8 +902,8 @@ class MorphologyManager:
         ET.SubElement(torso, "freejoint", name=f"{prefix}root")
         ET.SubElement(torso, "geom",
             name  = f"{prefix}torso_geom",
-            type  = "cylinder",
-            size  = f"{morph.torso_radius} {morph.torso_height}",
+            type  = "ellipsoid",
+            size  = f"{morph.torso_a} {morph.torso_b} {morph.torso_c}",
             rgba  = self._rgba(morph.torso_rgba),
         )
 
@@ -910,14 +933,14 @@ class MorphologyManager:
 
             if leg.parent_leg_idx is None and leg.body_part_idx is None:
                 # Root leg on the main torso
-                rx, ry, rz = self._rim_pos(leg.placement_angle_deg, morph.torso_radius)
+                rx, ry, rz = self._rim_pos(leg.placement_angle_deg, morph.torso_a, morph.torso_b)
                 attachment_body = torso
                 attach_pos      = (rx, ry, rz)
 
             elif leg.body_part_idx is not None:
                 # Leg mounted on a secondary body part
                 bp      = morph.body_parts[leg.body_part_idx]
-                rx, ry, rz = self._rim_pos(leg.placement_angle_deg, bp.radius)
+                rx, ry, rz = self._rim_pos(leg.placement_angle_deg, bp.a, bp.b)
                 attachment_body = body_part_elements[leg.body_part_idx]
                 attach_pos      = (rx, ry, rz)
 
