@@ -73,12 +73,12 @@ class ExperimentConfig:
 
     # ---- Identity -----------------------------------------------------------
     run_id:          str = ""            # filled automatically if empty
-    seed:            int = 31
+    seed:            int = 21
     description:     str = ""
-    strategy:        str = "map_elite"   # "mu_lambda" | "map_elite"
+    strategy:        str = "mu_lambda"   # "mu_lambda" | "map_elite"
 
     # ---- Population ---------------------------------------------------------
-    mu:              int = 4            # number of parents kept each generation
+    mu:              int = 5            # number of parents kept each generation
     lambda_:         int = 17           # number of offspring produced each generation by mutating the previous generation
     sigma:           int = 3            # number of fresh random morphologies injected each generation
     n_generations:   int = 10
@@ -152,7 +152,7 @@ class ExperimentConfig:
     batching:        int = 20
 
     # ---- Prompt -------------------------------------------------------------
-    prompt_name:     str = "kangaroo_morph"
+    prompt_name:     str = "lamp_morph"
 
     # ---- Descriptor (VLM-based MapElite feature assessment) -----------------
     # Name of a DescriptorConfig from descriptor.py; "" = structural-only mode.
