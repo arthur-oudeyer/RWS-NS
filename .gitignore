@@ -11,4 +11,5 @@
 **/venv/
 **/.venv/
 code/api_keys.py
-code/Morphology Only/results/*/*
+code/Morphology/results/*/*
+code/Controller/results/*/*
