@@ -168,11 +168,11 @@ def _print_progress(
     best  = archive.best()
     stats = archive.history[-1] if archive.history else None
     extra = f"  cells={len(archive.grid)}" if hasattr(archive, "grid") else ""
-    best_s = f"{best.fitness:+.4f}" if best else "N/A"
+    best_s = f"({best.fitness:+.4f}, {best.individual_id})" if best else "N/A"
     mean_s = f"{stats.mean_fitness:+.4f}" if stats else "N/A"
     print(
         f"[gen {generation:>3} / {n_generations}]  "
-        f"{phase:<8}  n={len(results):<3}  "
+        f"{phase:<8}  pool_n={len(results):<3}  "
         f"best={best_s}  mean={mean_s}  "
         f"{elapsed_s:.1f}s{extra}",
         flush=True,

@@ -119,7 +119,7 @@ def mutate_weights(
         rng = np.random.default_rng()
     v = parent.to_vector()
     noise = rng.normal(0.0, sigma, size=v.shape)
-    return RewardWeights.from_vector(v * np.exp(noise))
+    return RewardWeights.from_vector(v * np.exp(1.38 * noise))
 
 
 def random_initial_weights(

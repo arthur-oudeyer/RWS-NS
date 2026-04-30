@@ -63,19 +63,19 @@ class ExperimentConfig:
 
     # ---- Identity -----------------------------------------------------------
     run_id:        str = ""
-    seed:          int = 11
+    seed:          int = 12
     description:   str = ""
     strategy:      str = "mu_lambda"   # "mu_lambda" | "map_elite"
 
     # ---- Population ---------------------------------------------------------
-    mu:            int = 3
-    lambda_:       int = 12
+    mu:            int = 5
+    lambda_:       int = 10
     sigma:         int = 0          # fresh random individuals injected per gen
-    n_generations: int = 5
+    n_generations: int = 2
 
     # init_population_size : number of random individuals trained from scratch
     # at gen 0. mu_lambda → defaults to mu*2; map_elite → max(mu, lambda_)*2.
-    init_population_size: int = mu + lambda_   # 0 = strategy default
+    init_population_size: int = 50   # 0 = strategy default
 
     # ---- Morphology / Env ----------------------------------------------------
     morphology = "tripod" # Morphology, default None -> QUADRIPOD
@@ -94,8 +94,8 @@ class ExperimentConfig:
     # Mutation σ for the per-generation log-normal noise on each weight.
     # σ_init is used to widen the *initial* population around the default
     # vector so gen-0 individuals do not all collapse to the same prior.
-    reward_mutation_sigma:     float = 0.2
-    reward_init_sigma:         float = 0.4
+    reward_mutation_sigma:     float = 0.3
+    reward_init_sigma:         float = 0.8
 
     # ---- PPO inner loop -----------------------------------------------------
     n_init_steps: int = 80_000      # from-scratch training budget (gen 0)
@@ -116,7 +116,7 @@ class ExperimentConfig:
     control_frequency: int   = 20    # Hz — how often the policy outputs an action
     # MuJoCo timestep is set by the morphology XML (0.005 s); the env applies
     # the same action for `physics_steps_per_action` mj_steps.
-    fall_height:       float = 0.05  # torso z below this terminates the episode
+    fall_height:       float = 0.1  # torso z below this terminates the episode
 
     # ---- Video / VLM render -------------------------------------------------
     video_fps:           int  = 20
@@ -125,11 +125,11 @@ class ExperimentConfig:
     camera_track_torso:  bool = True
 
     # ---- Grader -------------------------------------------------------------
-    use_fake_grader = True
+    use_fake_grader = False
 
     grader_type:    str = "gemini"
     gemini_model:   str = "gemini-3-flash-preview"
-    batching:       int = 12           # videos per Gemini request
+    batching:       int = 10           # videos per Gemini request
     prompt_name:    str = "walk_forward"
     descriptor_config_name: str = ""  # "" = no MAP-Elites descriptors
 

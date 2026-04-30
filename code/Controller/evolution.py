@@ -235,10 +235,10 @@ class MuLambdaEvolution(BaseEvolution):
         for k, ind_id in enumerate(ids):
             rw   = random_initial_weights(defaults, sigma=self.cfg.reward_init_sigma, rng=self.rng)
             seed = int(self.cfg.seed) + ind_id
-            print(f"\r  [init {k}/{size} ] training individual {ind_id} from scratch ({self.cfg.n_init_steps:,} steps) ...", end='')
+            print(f"\r  [init {k + 1}/{size} ] training individual {ind_id} from scratch ({self.cfg.n_init_steps:,} steps) ...", end='')
             t0 = time.perf_counter()
             policy_path, fitness = self._train_from_scratch(rw, seed, ind_id)
-            print(f"\r  [init {k}/{size} ] rendering rollout for id={ind_id} ...", end='')
+            print(f"\r  [init {k + 1}/{size} ] rendering rollout for id={ind_id} ...", end='')
             video_path = self._render(policy_path, rw, ind_id, generation=0, seed=seed)
             specs.append(_IndividualSpec(
                 reward_weights = rw.to_dict(),
@@ -247,7 +247,7 @@ class MuLambdaEvolution(BaseEvolution):
                 parent_id      = None,
                 n_train_steps  = self.cfg.n_init_steps,
             ))
-            print(f"\r [init {k}/{size}] id={ind_id} trained and render in {time.perf_counter()-t0:.1f}s (fitness {fitness:.3f})")
+            print(f"\r [init {k + 1}/{size}] id={ind_id} trained and render in {time.perf_counter()-t0:.1f}s (fitness {fitness:.3f})")
         print(f"\r  [init {size}/{size} ] Training and Rendering succeeded. evaluating..",  end='')
 
         results, new_id = evaluate_batch(
@@ -280,7 +280,7 @@ class MuLambdaEvolution(BaseEvolution):
             parent_rw = RewardWeights(**parent.reward_weights)
             child_rw  = mutate_weights(parent_rw, sigma=self.cfg.reward_mutation_sigma, rng=self.rng)
             seed      = int(self.cfg.seed) + 1000 * generation + ind_id
-            print(f"\r  [step] {k}/{len(sampled_parents) - 1} gen={generation} id={ind_id} parent={parent.individual_id} "
+            print(f"\r  [step] {k + 1}/{len(sampled_parents)} gen={generation} id={ind_id} parent={parent.individual_id} "
                   f"warm-start {self.cfg.n_warm_steps:,} steps ...", end='', flush=True)
             t0 = time.perf_counter()
             policy_path, fitness = self._train_warm_start(child_rw, parent.policy_path, seed, ind_id)
@@ -292,7 +292,7 @@ class MuLambdaEvolution(BaseEvolution):
                 parent_id      = parent.individual_id,
                 n_train_steps  = self.cfg.n_warm_steps,
             ))
-            print(f"\r [step] {k}/{len(sampled_parents) - 1} trained and render in {time.perf_counter() - t0:.1f}s (fitness {fitness:.3f})")
+            print(f"\r [step] {k + 1}/{len(sampled_parents)} trained and render in {time.perf_counter() - t0:.1f}s (fitness {fitness:.3f})")
 
         print(f"\r  [step] Training and Rendering succeeded. evaluating..",  end='')
 
