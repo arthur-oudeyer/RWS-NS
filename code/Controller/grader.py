@@ -371,7 +371,7 @@ class LocomotionGrader:
             '      "observation":    "frame-by-frame factual description",\n'
             '      "interpretation": "behavioural interpretation",\n'
             '      "coherence":      { "score": <int 0-100>, "reason": "..." },\n'
-            '      "progress":       { "score": <int 0-100>, "reason": "..." },\n'
+            '      "originality":    { "score": <int 0-100>, "reason": "..." },\n'
             '      "interest":       { "score": <int 0-100>, "reason": "..." }'
             + (f',\n{desc_schema}' if desc_schema else "")
             + "\n    }"

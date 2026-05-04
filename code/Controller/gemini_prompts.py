@@ -79,7 +79,7 @@ def build_locomotion_prompt(target_behaviour: str) -> str:
     """
     output_format = """\
     {
-      "observation":    "key-time steps factual description (timestamps, floor-tile reference, posture)",
+      "observation":    "key-time steps factual description (timestamps, floor-tile reference, posture of each limb, ...)",
       "interpretation": "behavioural interpretation relative to the target",
       "coherence":      { "score": <int 0-100>, "reason": "..." },
       "originality":    { "score": <int 0-100>, "reason": "..." },
@@ -96,8 +96,8 @@ def build_locomotion_prompt(target_behaviour: str) -> str:
 
     The scene:
     - Fixed-pose camera that pans laterally to keep the torso in view, the floor
-      is a grassy checkerboard (use floor tiles as a position reference grid)
-    - The robot has a white ellipsoidal body parts and colored legs
+      is a grassy green checkerboard (use floor tiles as a position reference grid)
+    - The robot has white ellipsoidal body parts and colored legs
     - Background is plain blue (no distractors)
     
     Target behaviour : {target_behaviour}
@@ -105,26 +105,27 @@ def build_locomotion_prompt(target_behaviour: str) -> str:
     ═══ ANALYSIS ═══
 
     Step 1 — Frame-by-frame factual observation
-    Be specific. Count tiles to estimate displacement between frames. Note the moment of any event, 
+    Be specific. Note the moment of any event, the position of the limb, de displacement of the robot between frames.
     example :
-    - Frame 1 (0.0 s): posture, position, contact pattern
-    - ~2.5 s: posture, did it advance / stagnate / fall?
-    - Final frame (~5.0 s): final posture, final position relative to start
-    - Key events: fall at X s, stagnation at Y s, gait change at Z s, …
+    - Frame 1 (0.0 s): the robot is standing upright, 3 limbs are touching the floor and one (the blue one) is pointing toward the sky.
+    - ~2.0 s: the robot have just started a movement toward the left, it's limbs are moving in a periodic but nervous pattern but slip a lot on the ground. The robot stays balanced but tilts a lot in some positions.
+    - ~2.5 s: the robot have moved by around 3 ground tiles from its starting point toward the left, his gait looks like he is nervous due to hesitating but brutal movements. The limbs are all touching the ground in a stable position. The torso is slightly tilted but the overall balance is good.
+    - Final frame (~5.0 s): the robot has completely crashed on the ground, he has 3 out of 4 limbs toward the sky and is laying on the side. He is not moving anymore.
+    - Key events: fall at 4s s, stagnation at 4s s, gait change at 2s, …
 
     Step 2 — Behavioural interpretation
-    - Did the robot make consistent forward progress, intermittent progress, or none toward the target behavior ?
-    - Was the gait coherent (periodic, balanced, repeatable) or random thrashing ?
-    - Is there anything novel or interesting about the motion pattern even if the robot did not perform well for the target behavior ?
+    - Did the robot make consistent consistent action relevant with the target behavior ?
+    - Was the gait coherent (periodic, balanced, repeatable) or random ? What was the type of the gait (smooth, energetic, nervous, wide, brutal, efficient, small, homogenous, ...) ?
+    - Is there anything novel or interesting about the motion pattern even if the robot did not perform well for the target behavior ? (ex: is a limb doing a movement with great potential ?)
 
     Step 3 — Conservative scoring (each dimension 0–100)
 
-    coherence — Is the gait stable, periodic and well-controlled ?
+    coherence — Is the gait relevant for the target behavior ?
       0–29   = chaotic thrashing, immediate collapse, fully static or no recognisable pattern
-      30–49  = unstable, sporadic; one or two coherent moments only
-      50–69  = partial coherence; clear periodic pattern but with wobble or stalls
-      70–89  = coherent, repeatable gait; minor instabilities only
-      90–100 = clean, stable, periodic locomotion throughout
+      30–49  = unstable, sporadic; one or two coherent moments only that have a link to the target
+      50–69  = partial coherence; clear periodic pattern or specific movement but with wobble or stalls. The target can be identified.
+      70–89  = coherent, repeatable gait or target well reached ; minor instabilities only. The intention toward target is obvious.
+      90–100 = clean, stable, periodic locomotion throughout, the target is perfectly depict through this video.
 
     originality — Did the robot achieve something toward the behavioral target in an original way ?
       0–29   = no movement or movement very basic with no progress toward the target
@@ -133,13 +134,13 @@ def build_locomotion_prompt(target_behaviour: str) -> str:
       70–89  = clear and unexpected movement that somehow help the robot progress toward the target behavior
       90–100 = very unexpected but very efficient way to reach the behavior wanted
 
-    interest — Is the gait pattern interesting or biologically plausible?
+    interest — Is the gait pattern interesting, biologically plausible and leads to a real evolutionary potential ?
       0–29   = uninteresting (random, fallen) or obviously broken
       30–49  = generic, predictable motion with no notable features
-      50–69  = one notable element (unusual gait phase, rhythm, recovery)
+      50–69  = one notable element (unusual gait phase, rhythm, recovery) that have potential
       70–89  = clearly interesting motion: reminiscent of an animal gait,
-               coordinated pattern, or creative body usage
-      90–100 = highly interesting; novel and biologically convincing locomotion, great abilities
+               coordinated pattern, or creative body usage to reached the target. There is a great potential.
+      90–100 = highly interesting; novel and biologically convincing locomotion, great abilities and great potential for further evolution.
 
     Be conservative. Do not infer behaviour you did not or barely see. A frame that
     "looks like it could be moving" but with no actual displacement is NOT movement — call it stagnation.
@@ -247,5 +248,5 @@ if __name__ == "__main__":
         print(f"  {cfg.name}  (target = {cfg.target})")
         print(f"  weights : coherence={cfg.weights.coherence} "
               f"progress={cfg.weights.originality} interest={cfg.weights.interest}")
-        print(f"\n--- Prompt preview (first 240 chars) ---")
-        print(cfg.prompt[:240].strip(), "...")
+        print()
+        print(cfg.prompt.strip())

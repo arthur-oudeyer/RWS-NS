@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 # ── Config ────────────────────────────────────────────────────────────────────
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from api_keys import APIKEY_GEMINI
 
 API_KEY = APIKEY_GEMINI
@@ -16,7 +16,7 @@ Gemini 3.1 Flash-Lite -> gemini-3.1-flash-lite-preview
 Gemini 3 Flash        -> gemini-3-flash-preview
 Gemini 3.1 Pro        -> gemini-3.1-pro-preview
 """
-MODEL   = "gemini-3.1-pro-preview"
+MODEL   = "gemini-3-flash-preview"
 
 client = genai.Client(api_key=API_KEY)
 

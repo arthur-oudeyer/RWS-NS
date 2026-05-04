@@ -118,6 +118,8 @@ def train_from_scratch(
     batch_size:        int   = 256,
     use_subproc:       bool  = True,
     verbose:           int   = 0,
+    callback                 = None,
+    device:            str   = "auto",
 ):
     """
     Train one PPO policy from random initial weights against
@@ -148,12 +150,14 @@ def train_from_scratch(
             policy_kwargs    = policy_kwargs,
             tensorboard_log  = tensorboard_log,
             verbose          = verbose,
+            device           = device,
         )
         model.learn(
-            total_timesteps  = int(total_timesteps),
-            tb_log_name      = tb_run_name or "from_scratch",
+            total_timesteps     = int(total_timesteps),
+            tb_log_name         = tb_run_name or "from_scratch",
             reset_num_timesteps = True,
-            progress_bar     = False,
+            progress_bar        = False,
+            callback            = callback,
         )
 
         # --- Get end fitness from ep_info_buffer ---
@@ -187,6 +191,8 @@ def train_warm_start(
     fall_height:        float = 0.05,
     use_subproc:        bool  = True,
     verbose:            int   = 0,
+    callback                  = None,
+    device:             str   = "auto",
 ):
     """
     Continue training the parent's PPO policy against the child's mutated
@@ -213,13 +219,15 @@ def train_warm_start(
             env             = vec,
             tensorboard_log = tensorboard_log,
             verbose         = verbose,
+            device          = device,
         )
         model.set_random_seed(seed)
         model.learn(
-            total_timesteps  = int(n_warm_steps),
-            tb_log_name      = tb_run_name or "warm_start",
+            total_timesteps     = int(n_warm_steps),
+            tb_log_name         = tb_run_name or "warm_start",
             reset_num_timesteps = False,
-            progress_bar     = False,
+            progress_bar        = False,
+            callback            = callback,
         )
 
         # --- Get end fitness from ep_info_buffer ---

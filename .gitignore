@@ -2,6 +2,7 @@
 **/*.mp4
 **/*/*.png
 **/*.pyc
+**/*.zip
 **/*.json
 **/*.jsonl
 **/*.pkl

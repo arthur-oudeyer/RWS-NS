@@ -70,10 +70,25 @@ class RewardWeights:
     forward_velocity: float = 1.0     # rewards +v_x torso
     lateral_drift:    float = 0.1     # penalises |v_y| torso
     upright_bonus:    float = 0.5     # rewards upright posture
-    energy_penalty:   float = 0.001   # penalises sum(action**2)
+    energy_penalty:   float = 0.01   # penalises sum(action**2)
     contact_reward:   float = 0.1     # rewards feet in contact
     alive_bonus:      float = 0.05    # rewards every alive step
     fall_penalty:     float = 10.0    # one-off penalty on fall
+
+    # To implement :
+    no_contact_reward: float = 0.1  # rewards feet in the air
+    torso_height_reward: float = 0.1 # Reward when the torso is high (z axis)
+    torso_rotation_reward: float = 0.1 # reward when the torso is rotating (around the z axis)
+    torso_tilting_speed_reward: float = 0.1  # Reward when the torso have angular speed (around x / y axis)
+    limb_coordination_reward: float = 0.1  # Reward as much as the limbs (attached to torso) are in the same position to each other
+    # Maybe others ?
+
+    nervosity_reward: float = 0.1 # Reward when the articulation speed change quicly a lot (huge acceleration)
+    smooth_reward: float = 0.1  # Reward when the articulation speed is not changing a lot (small acceleration)
+
+    # To rename :
+    # lateral_drift -> lateral_drift_penalty
+    # forward_velocity -> forward_velocity_reward
 
     # ---- vector form ------------------------------------------------------
 

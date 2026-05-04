@@ -742,3 +742,293 @@ do not silently decide:
 | Descriptor | A categorical or scalar feature returned by the VLM that places an individual in a MAP-Elites cell |
 | Static morph | The frozen QUADRIPOD body, identical for every individual |
 | Lineage | The chain of parent → child relationships traced through `parent_id`. Cumulative inner-loop compute for an individual at depth k is `n_init_steps + k * n_warm_steps`. Useful for analysing reward-weight drift, inherited policy bias, and the compute–fitness curve over generations. |
+
+---
+
+## 13. Interactive development tools
+
+Two tkinter desktop tools are provided for studying the PPO inner loop outside
+of a full evolutionary run. They share no shared state with `experiment.py` and
+write to their own `results/study_output/` directory.
+
+### 13.1  `utils/controller_generator_renderer.py` — Controller Trainer & Generator
+
+An interactive GUI for manually exploring the PPO training loop: generate or
+mutate reward weight vectors, watch a live fitness plot as PPO trains, then
+play back the rendered MP4 rollout — all without running a full evolutionary
+experiment.
+
+**Launch:**
+```bash
+cd code/Controller
+python utils/controller_generator_renderer.py
+```
+
+**Session model.** The app maintains a session history (a list of
+`IndividualResult` objects). Navigation buttons operate on this history:
+
+| Button | Key | Action |
+|--------|-----|--------|
+| Back   | B   | Re-display previous individual (restores its weights/video) |
+| New    | N   | Train a fresh individual from scratch with random-init weights |
+| Mutate | M   | Mutate the current individual's reward weights; warm-start PPO from its policy |
+| Continue | C | Warm-start the current individual's policy against its **same** reward weights for another `n_warm_steps` |
+| Edit Weights | T | Train from the manually set reward weight sliders (ignoring any parent) |
+| Save video | V | Open file dialog to save the current MP4 |
+| Skip   | S   | Skip playback; mark individual as done without rendering |
+
+**Panels (left sidebar):**
+
+- **Training params** — `n_init_steps` / `n_warm_steps` / `n_envs` / `episode_duration` sliders and a device radio (`cpu` / `mps`). `n_envs` controls how many parallel MuJoCo environments PPO collects data from simultaneously — more envs = more diverse rollouts per update = faster wall-clock, but higher RAM usage.
+- **Mutation sigma** — Controls the per-dimension log-normal noise applied by `mutate_weights()`. Higher σ → more aggressive jumps in reward space.
+- **Reward Weights** — Seven labelled sliders, one per `RewardWeights` field. These sliders always reflect the **current individual's** weights after every Mutate / New / Load operation. When you click [T] (Edit Weights), PPO is trained against whatever values are currently set in these sliders.
+- **Session stats** — Live counter of individuals trained this session, plus the current individual's `total_steps_trained` (cumulative PPO steps across from-scratch + all [C] continue runs).
+- **Individual info** — Shows the last individual's mode (`scratch` / `warm` / `manual` / `continue`), fitness (mean reward of last 10 PPO episodes), and step count.
+- **Config summary** — Prints the effective `ExperimentConfig` fields for reference.
+
+**Live training feedback:**
+
+- A **progress bar** tracks the current PPO run from 0 → 100%.
+- A **fitness plot** (live, no matplotlib) updates every rollout epoch. X-axis = steps elapsed in the current run; Y-axis = mean episode reward of the last 20 PPO episodes. The plot resets at the start of each new training run. It gives immediate feedback on whether a reward weight configuration leads to a climbing, stagnant, or collapsing fitness curve — the key diagnostic for reward shaping.
+
+**Output directory** is cleared on every launch. All policies and videos are
+written to `results/study_output/`.
+
+**Interaction notes:**
+- `var.set()` on a tkinter Scale does **not** fire the `command=` callback; the
+  app maintains a separate `_rw_val_labels` dict and updates labels directly in
+  `_sync_rw_sliders()`.
+- All PPO / MuJoCo work runs in a daemon thread. The UI polls a
+  `queue.Queue` every 200 ms via `root.after(200, self._poll)` — this keeps the
+  tkinter main loop responsive during training.
+- Video playback uses `imageio` frame extraction into a list of `PIL.Image`
+  objects; animation is driven by `root.after(50, ...)` at ~20 fps.
+
+### 13.2  `results/data_analyser.py` — Run Explorer
+
+Post-hoc interactive viewer for completed evolutionary runs. Reads the
+`log.jsonl` and `individuals_log.jsonl` files that `experiment.py` writes.
+
+**Launch:**
+```bash
+cd code/Controller
+python results/data_analyser.py                      # opens file dialog to pick a run dir
+python results/data_analyser.py results/run_XXXXXX   # open run dir directly
+```
+
+**Features:**
+- Fitness-over-generations chart (matplotlib embedded via TkAgg backend)
+- Individual browser: click any point to inspect that individual's reward
+  weights, fitness, descriptor, and lineage
+- Embedded video player (`SimpleVideoPlayer`) backed by `av` + Pillow for
+  looping MP4 playback in-app — no external player needed
+- Archive grid heatmap for MAP-Elites runs (descriptor axes as X/Y, fitness as
+  colour)
+
+**Dependencies:** `matplotlib`, `Pillow`, `av` (PyAV for video decode).
+
+---
+
+## 14. PPO internals — callbacks and hyperparameter tuning
+
+### 14.1  The `_TrainingCallback` (live feedback during training)
+
+`utils/controller_generator_renderer.py` injects a `stable_baselines3`
+callback into every PPO training call to stream progress and fitness data back
+to the UI without polling the process or blocking the main thread.
+
+```python
+class _TrainingCallback(BaseCallback):
+    def __init__(self, total_steps, result_queue, interval=500):
+        super().__init__(verbose=0)
+        self._total    = total_steps
+        self._queue    = result_queue
+        self._interval = interval   # post a progress update every N steps
+        self._start    = 0
+        self._last     = 0
+
+    def _on_training_start(self) -> None:
+        # Capture the model's timestep counter at the *start* of this run.
+        # For warm-start (reset_num_timesteps=False) the counter is already
+        # > 0 (the parent's step count), so we compute progress relative to
+        # this snapshot, not to the model's lifetime counter.
+        self._start = self.num_timesteps
+        self._last  = 0
+
+    def _on_step(self) -> bool:
+        elapsed = self.num_timesteps - self._start
+        if elapsed - self._last >= self._interval:
+            self._queue.put(("progress", min(1.0, elapsed / self._total)))
+            self._last = elapsed
+        return True
+
+    def _on_rollout_end(self) -> None:
+        # Called once per rollout collection (every n_steps_per_env steps).
+        # Post the mean reward of the last 20 finished episodes as a fitness
+        # point so the UI can update its live plot.
+        buf = list(self.model.ep_info_buffer)
+        if buf:
+            elapsed  = self.num_timesteps - self._start
+            mean_r   = float(np.mean([ep["r"] for ep in buf[-20:]]))
+            self._queue.put(("fitness_point", (elapsed, mean_r)))
+```
+
+The callback is passed to `ppo_trainer.train_from_scratch` and
+`ppo_trainer.train_warm_start` via the `callback=` argument (added to both
+functions as an optional parameter, defaulting to `None` for backward
+compatibility with `experiment.py`).
+
+**Why capture `self._start` in `_on_training_start`?** — In a warm-start run
+`PPO.learn(reset_num_timesteps=False)` continues counting from where the parent
+left off. Without the snapshot, `elapsed / total` would immediately exceed 1.0
+and the progress bar would appear full. The snapshot makes the fraction relative
+to the current run, regardless of the model's accumulated lifetime step count.
+
+**Queue message types:**
+
+| Type | Payload | When posted |
+|------|---------|-------------|
+| `"status"` | `str` | Human-readable status change (starting, done, error) |
+| `"progress"` | `float` in [0, 1] | Every `interval` steps during training |
+| `"fitness_point"` | `(int, float)` — (step, mean_r) | End of each rollout collection |
+| `"done"` | `IndividualResult` | Training + rollout complete |
+| `"error"` | `str` | Exception in the worker thread |
+
+### 14.2  PPO hyperparameter reference
+
+All values live in `config.py:ExperimentConfig`. This table covers influence
+and tuning guidance specific to this locomotion task (5 s episodes, 4-actuator
+quadruped, `n_envs` parallel environments).
+
+#### `policy_arch` — default `[256, 256]`
+
+Defines the MLP hidden layer sizes shared by the policy head and value head.
+`[256, 256]` = two hidden layers of 256 neurons each; this is the standard for
+continuous-control locomotion and is large enough for the ~20-dim observation
+space and 4-dim action space.
+
+- **Too small** (`[32, 32]`): Policy lacks capacity to represent a coherent
+  gait; training may converge to a degenerate stand-still strategy.
+- **Too large** (`[1024, 1024]`): Slower per-update; diminishing returns for
+  this task; also makes warm-start less stable since more parameters need
+  to "re-orient" to the new reward.
+- **Tuning signal**: If from-scratch training plateaus early with a clean
+  fitness curve, the architecture is not the bottleneck. If the curve is noisy
+  and the gait looks chaotic even after `n_init_steps`, try adding a third
+  layer or switching to `[512, 512]`.
+
+#### `learning_rate` — default `3e-4`
+
+Adam optimiser step size for both policy and value network updates.
+
+- **Too high** (`> 1e-3`): Policy updates destroy previously learned locomotion;
+  particularly dangerous for warm-starts where the parent's competence must
+  be preserved and gradually redirected.
+- **Too low** (`< 1e-5`): Children barely diverge from their parent within
+  `n_warm_steps`; the EA cannot explore the reward-weight space effectively.
+- **Tuning signal**: For warm-starts where children look identical to the
+  parent, try raising to `5e-4`. For unstable from-scratch runs (fitness
+  spikes up then collapses), lower to `1e-4`.
+
+#### `gamma` — default `0.99`
+
+Discount factor on future rewards. At γ=0.99, a reward 100 steps away
+(= 5 s at 20 Hz, one full episode) is worth `0.99^100 ≈ 0.37` of an immediate
+reward.
+
+- **Critical for `fall_penalty`**: This is a one-off terminal penalty. If γ
+  is too low the agent cannot "see" the fall cost far enough in advance to
+  avoid it — resulting in policies that walk boldly then fall.
+- **Tuning signal**: Do not lower below 0.97 for this task. If the agent
+  never learns to avoid falls, this is the first parameter to raise (try
+  0.995).
+
+#### `gae_lambda` — default `0.95`
+
+λ parameter for Generalized Advantage Estimation. Controls bias-variance
+trade-off in advantage estimates used by the policy gradient.
+
+- λ = 1 → Monte Carlo advantage (low bias, high variance — noisy training).
+- λ = 0 → 1-step TD advantage (high bias, low variance — smooth but slow).
+- `0.95` is robust for dense-reward locomotion (alive_bonus + contact_reward
+  + forward_velocity fire every step).
+- **Tuning signal**: Only lower (to 0.9) if the training loss oscillates wildly
+  and `learning_rate` tuning did not help. Almost never the root cause.
+
+#### `ent_coef` — default `0.0`
+
+Weight on the entropy bonus added to the PPO loss, encouraging the policy
+to stay stochastic and explore.
+
+- `0.0` = no exploration bonus; the policy converges greedily.
+- In this EA, diversity comes from the **outer loop** (reward weight mutation)
+  — not from within a single PPO run. The inner loop should converge, not
+  explore. `0.0` is correct.
+- **Exception**: If from-scratch training gets trapped in a degenerate local
+  optimum early (e.g. robot falls on the first step and the policy never
+  recovers), try `0.005`–`0.01` for `n_init_steps` only. Immediately reset to
+  `0.0` for subsequent warm-starts.
+
+#### `vf_coef` — default `0.5`
+
+Weight of the value function (critic) loss in the combined PPO loss:
+`loss = policy_loss + vf_coef × value_loss − ent_coef × entropy`.
+
+The critic produces baseline estimates for GAE — a well-fitted critic reduces
+variance in the advantage estimates and improves policy gradient quality.
+`0.5` is the SB3 default and is almost never the bottleneck.
+
+- **Tuning signal**: Only lower (to `0.25`) if the critic appears to be
+  overfitting the rollout data (value loss drops to near-zero while policy
+  loss stagnates). In practice, leave at `0.5`.
+
+#### `n_steps_per_env` — default `2048`
+
+Number of env steps each vectorised environment collects before one PPO
+update round. Total rollout buffer = `n_steps_per_env × n_envs`.
+
+With the defaults (`n_steps_per_env=2048, n_envs=8`), each PPO update
+processes `16,384` steps — roughly **163 full 5 s episodes**. This gives
+each update diverse, representative experience.
+
+- **Too large**: Updates are well-calibrated but infrequent; the policy adapts
+  slowly to the new reward — a problem for short warm-starts.
+- **Too small**: More frequent updates but high variance; can cause erratic
+  gait oscillations.
+- **Tuning signal**: For warm-starts where `n_warm_steps` is short (< 50 k),
+  consider reducing to `512`–`1024` so the policy gets more gradient steps per
+  timestep budget. Keep at `2048` for long from-scratch runs.
+- **Constraint**: `(n_steps_per_env × n_envs)` must be divisible by
+  `batch_size`.
+
+#### `batch_size` — default `256`
+
+Mini-batch size within each PPO update round. The full rollout buffer is
+shuffled and split into mini-batches of this size; each mini-batch produces
+one gradient update. SB3 default `n_epochs=10` means the buffer is swept 10
+times per update round.
+
+- Must evenly divide `n_steps_per_env × n_envs` (= 16,384 with defaults).
+  Valid choices: 128, 256, 512, 1024, 2048, 4096, 8192.
+- **Too large** (→ 8192): Smoother gradients but risk overfitting the rollout
+  buffer; each update round produces fewer gradient steps.
+- **Too small** (→ 64): Noisy gradients; can help escape local optima but
+  may destabilise warm-starts.
+- **Tuning signal**: Change only when you change `n_steps_per_env` or
+  `n_envs`. Scale proportionally: `batch_size ≈ total_rollout / 64` is a
+  reasonable heuristic. For quick debug runs (`n_steps_per_env=256, n_envs=1`)
+  use `batch_size=64`.
+
+### 14.3  Device selection on Apple Silicon
+
+MuJoCo simulation and data collection always run on CPU. For tiny MLPs
+(`[256, 256]` with 4-dim actions), the cost of transferring each mini-batch
+between CPU and MPS exceeds the GPU compute saving — resulting in **~5×
+slower training** than CPU-only (observable as 0% ↔ 50% GPU usage spikes:
+the GPU is idle during rollout collection on CPU, then saturated briefly
+during the mini-batch update, then idle again).
+
+The default device is therefore `"cpu"`. To experiment with MPS anyway, set
+`device = "mps"` in the Training Params panel of the interactive tool or in
+`ExperimentConfig`. Only likely to benefit if you increase `policy_arch`
+substantially (e.g. `[1024, 1024, 1024]`) or use very large batch sizes.

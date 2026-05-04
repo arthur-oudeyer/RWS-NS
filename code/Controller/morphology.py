@@ -455,7 +455,7 @@ class MorphologyManager:
     floor_texrepeat : checker tile density on the floor texture.
     """
 
-    def __init__(self, floor_texrepeat: int = 256, photorealistic: bool = False):
+    def __init__(self, floor_texrepeat: int = 128, photorealistic: bool = False):
         self.floor_texrepeat  = floor_texrepeat
         self.photorealistic   = photorealistic
 

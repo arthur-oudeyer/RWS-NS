@@ -63,19 +63,19 @@ class ExperimentConfig:
 
     # ---- Identity -----------------------------------------------------------
     run_id:        str = ""
-    seed:          int = 12
+    seed:          int = 13
     description:   str = ""
     strategy:      str = "mu_lambda"   # "mu_lambda" | "map_elite"
 
     # ---- Population ---------------------------------------------------------
-    mu:            int = 5
-    lambda_:       int = 10
+    mu:            int = 3
+    lambda_:       int = 7
     sigma:         int = 0          # fresh random individuals injected per gen
     n_generations: int = 2
 
     # init_population_size : number of random individuals trained from scratch
     # at gen 0. mu_lambda → defaults to mu*2; map_elite → max(mu, lambda_)*2.
-    init_population_size: int = 50   # 0 = strategy default
+    init_population_size: int = 10   # 0 = strategy default
 
     # ---- Morphology / Env ----------------------------------------------------
     morphology = "tripod" # Morphology, default None -> QUADRIPOD
@@ -98,9 +98,9 @@ class ExperimentConfig:
     reward_init_sigma:         float = 0.8
 
     # ---- PPO inner loop -----------------------------------------------------
-    n_init_steps: int = 80_000      # from-scratch training budget (gen 0)
-    n_warm_steps: int = 20_000      # warm-start budget for mutated children
-    n_envs:       int = 4
+    n_init_steps: int = 1_000_000      # from-scratch training budget (gen 0)
+    n_warm_steps: int = 250_000       # warm-start budget for mutated children
+    n_envs:       int = 8
     policy_arch:  list = field(default_factory=lambda: [256, 256])
     learning_rate:    float = 3e-4
     gamma:            float = 0.99
