@@ -50,6 +50,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 
+import config as _cfg
 from controller_morph import build_model
 from reward import RewardWeights, compute_step_reward
 
@@ -74,9 +75,15 @@ class RobotSensorReading:
     hip_angles:             np.ndarray   # (n_joints,)
     hip_velocities:         np.ndarray   # (n_joints,)
     n_contacts:             int          # number of feet in ground contact
+    n_feet_total:           int          # total number of feet (for airborne fraction)
 
 
-def _read_sensors(model: mujoco.MjModel, data: mujoco.MjData, n_joints: int) -> RobotSensorReading:
+def _read_sensors(
+    model: mujoco.MjModel,
+    data:  mujoco.MjData,
+    n_joints:    int,
+    n_feet_total: int = 4,
+) -> RobotSensorReading:
     """Extract a `RobotSensorReading` from the raw MjData arrays."""
     # qpos: [3 pos | 4 quat | n_joints hip angles]
     # qvel: [3 lin | 3 ang  | n_joints hip vels]
@@ -101,6 +108,7 @@ def _read_sensors(model: mujoco.MjModel, data: mujoco.MjData, n_joints: int) -> 
         hip_angles             = data.qpos[7 : 7 + n_joints].copy(),
         hip_velocities         = data.qvel[6 : 6 + n_joints].copy(),
         n_contacts             = n_contacts,
+        n_feet_total           = n_feet_total,
     )
 
 
@@ -140,6 +148,13 @@ class RobotControllerEnv(gym.Env):
         render_mode:       Optional[str]           = None,
         render_width:      int                     = 192,
         render_height:     int                     = 192,
+        cam1_azimuth:      float                   = _cfg.ExperimentConfig.cam1_azimuth,
+        cam1_elevation:    float                   = _cfg.ExperimentConfig.cam1_elevation,
+        cam1_distance:     float                   = _cfg.ExperimentConfig.cam1_distance,
+        cam1_lookat_z:     float                   = _cfg.ExperimentConfig.cam1_lookat_z,
+        cam2_azimuth:      float                   = _cfg.ExperimentConfig.cam2_azimuth,
+        cam2_elevation:    float                   = _cfg.ExperimentConfig.cam2_elevation,
+        cam2_distance:     float                   = _cfg.ExperimentConfig.cam2_distance,
     ):
         super().__init__()
         self.reward_weights    = reward_weights or RewardWeights()
@@ -155,6 +170,7 @@ class RobotControllerEnv(gym.Env):
         self._data = mujoco.MjData(self._model)
 
         self._n_joints = self._morph.n_joints
+        self._n_feet   = len(self._morph.legs)
         self._timestep = float(self._model.opt.timestep)
         self._physics_steps_per_action = max(
             1, int(round(1.0 / (self.control_frequency * self._timestep)))
@@ -181,14 +197,23 @@ class RobotControllerEnv(gym.Env):
         )
 
         # Internal episode state
-        self._step_idx     = 0
-        self._sim_time     = 0.0
-        self._renderer:    Optional[mujoco.Renderer] = None
+        self._step_idx      = 0
+        self._sim_time      = 0.0
+        self._prev_action   = np.zeros(self._n_joints, dtype=np.float32)
+        self._renderer:     Optional[mujoco.Renderer] = None
+        self._renderer2:    Optional[mujoco.Renderer] = None
+
         self._render_camera = mujoco.MjvCamera()
-        self._render_camera.azimuth   = 90.0
-        self._render_camera.elevation = -15.0
-        self._render_camera.distance  = 1.8
-        self._render_camera.lookat[:] = [0.0, 0.0, 0.2]
+        self._render_camera.azimuth   = cam1_azimuth
+        self._render_camera.elevation = cam1_elevation
+        self._render_camera.distance  = cam1_distance
+        self._render_camera.lookat[:] = [0.0, 0.0, cam1_lookat_z]
+
+        self._render_camera2 = mujoco.MjvCamera()
+        self._render_camera2.azimuth   = cam2_azimuth
+        self._render_camera2.elevation = cam2_elevation
+        self._render_camera2.distance  = cam2_distance
+        self._render_camera2.lookat[:] = [0.0, 0.0, 0.2]
 
         # RNG (gym v1 uses np_random)
         self._np_random, _ = gym.utils.seeding.np_random(seed)
@@ -212,17 +237,20 @@ class RobotControllerEnv(gym.Env):
             self._data.qpos[7 : 7 + self._n_joints] = jitter
         mujoco.mj_forward(self._model, self._data)
 
-        self._step_idx = 0
-        self._sim_time = 0.0
-        self._fell     = False
+        self._step_idx    = 0
+        self._sim_time    = 0.0
+        self._fell        = False
+        self._prev_action = np.zeros(self._n_joints, dtype=np.float32)
         return self._build_obs(), {}
 
     def step(self, action: np.ndarray):
         action = np.asarray(action, dtype=np.float32)
         action = np.clip(action, -1.0, 1.0)
 
+        prev_action = self._prev_action  # snapshot before physics step
+
         # Convert action (Δ-angle proxy in [-1, 1]) to a target hip angle.
-        sensors_pre = _read_sensors(self._model, self._data, self._n_joints)
+        sensors_pre = _read_sensors(self._model, self._data, self._n_joints, self._n_feet)
         target = sensors_pre.hip_angles + self._delta_scale * action
         target = np.clip(target, self._ctrl_low, self._ctrl_high)
         self._data.ctrl[:] = target
@@ -233,7 +261,7 @@ class RobotControllerEnv(gym.Env):
         self._sim_time += self._physics_steps_per_action * self._timestep
         self._step_idx += 1
 
-        sensors  = _read_sensors(self._model, self._data, self._n_joints)
+        sensors  = _read_sensors(self._model, self._data, self._n_joints, self._n_feet)
         fell_now = sensors.torso_height < self.fall_height
         # `fell` is the one-step transition into the fallen state, used by
         # compute_step_reward so the fall_penalty fires exactly once.
@@ -241,8 +269,9 @@ class RobotControllerEnv(gym.Env):
         self._fell = self._fell or fell_now
 
         reward = compute_step_reward(
-            self.reward_weights, sensors, action, fell_transition
+            self.reward_weights, sensors, action, prev_action, fell_transition
         )
+        self._prev_action = action
 
         terminated = bool(self._fell)
         truncated  = self._step_idx >= self._max_steps
@@ -262,25 +291,41 @@ class RobotControllerEnv(gym.Env):
             self._renderer = mujoco.Renderer(
                 self._model, height=self._render_height, width=self._render_width
             )
-        # Camera follows the torso laterally (X follows; Z fixed) so the gait
-        # is centred in frame for the VLM.
+        if self._renderer2 is None:
+            self._renderer2 = mujoco.Renderer(
+                self._model, height=self._render_height, width=self._render_width
+            )
+        # Both cameras follow the torso along X so the gait stays centred.
         torso_x = float(self._data.qpos[0])
-        cam = self._render_camera
-        cam.lookat[0] = torso_x
-        self._renderer.update_scene(self._data, camera=cam)
-        return self._renderer.render()
+
+        cam1 = self._render_camera
+        if _cfg.ExperimentConfig.camera_track_torso:
+            cam1.lookat[0] = torso_x
+        self._renderer.update_scene(self._data, camera=cam1)
+        frame1 = self._renderer.render()
+
+        cam2 = self._render_camera2
+        if _cfg.ExperimentConfig.camera_track_torso:
+            cam2.lookat[0] = torso_x
+        self._renderer2.update_scene(self._data, camera=cam2)
+        frame2 = self._renderer2.render()
+
+        return np.concatenate([frame1, frame2], axis=1)
 
     def close(self):
         if self._renderer is not None:
             self._renderer.close()
             self._renderer = None
+        if self._renderer2 is not None:
+            self._renderer2.close()
+            self._renderer2 = None
 
     # ------------------------------------------------------------------
     # Observation builder
     # ------------------------------------------------------------------
 
     def _build_obs(self) -> np.ndarray:
-        sensors = _read_sensors(self._model, self._data, self._n_joints)
+        sensors = _read_sensors(self._model, self._data, self._n_joints, self._n_feet)
         t = self._sim_time
         # Same three frequencies as proto.simple_brain.get_input_clocks
         clocks = np.array([np.sin(t * 1 / np.pi),

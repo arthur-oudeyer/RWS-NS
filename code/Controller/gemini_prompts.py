@@ -94,20 +94,21 @@ def build_locomotion_prompt(target_behaviour: str) -> str:
     CONSERVATIVE — do not give benefit of the doubt and do not assume movement
     if you are unsure.
 
-    The scene:
-    - Fixed-pose camera that pans laterally to keep the torso in view, the floor
-      is a grassy green checkerboard (use floor tiles as a position reference grid)
-    - The robot has white ellipsoidal body parts and colored legs
-    - Background is plain blue (no distractors)
+    The scene of each video is composed of :
+    - 2 horizontally merged video of the same scene. The left view is a side-view of the robot, the right view is a 3/4 view.
+    - Each two scene has a fixed-pose camera
+    - The floor is a grassy green checkerboard, with a grey-green square plate on it which is the start location of the robot, it is static and used has reference for spatial distances.
+    - The robot has white ellipsoidal body parts (like the base torso) and colored legs with yellow sphere as feet.
+    - Background is plain blue (no distractors) (only visible on left view)
     
     Target behaviour : {target_behaviour}
 
     ═══ ANALYSIS ═══
 
     Step 1 — Frame-by-frame factual observation
-    Be specific. Note the moment of any event, the position of the limb, de displacement of the robot between frames.
+    Be specific. Note the moment of any event, the position of the limb, de displacement of the robot between frames. Use the starting plate as relative displacement / movement reference, if the robot is not on it, it means it has moved.
     example :
-    - Frame 1 (0.0 s): the robot is standing upright, 3 limbs are touching the floor and one (the blue one) is pointing toward the sky.
+    - Frame 1 (0.0 s): the robot is standing upright (the torso is sufficiently high), 3 limbs are touching the floor and one (the blue one) is pointing toward the sky.
     - ~2.0 s: the robot have just started a movement toward the left, it's limbs are moving in a periodic but nervous pattern but slip a lot on the ground. The robot stays balanced but tilts a lot in some positions.
     - ~2.5 s: the robot have moved by around 3 ground tiles from its starting point toward the left, his gait looks like he is nervous due to hesitating but brutal movements. The limbs are all touching the ground in a stable position. The torso is slightly tilted but the overall balance is good.
     - Final frame (~5.0 s): the robot has completely crashed on the ground, he has 3 out of 4 limbs toward the sky and is laying on the side. He is not moving anymore.

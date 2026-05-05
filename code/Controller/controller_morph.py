@@ -51,9 +51,11 @@ STATIC_MORPH: RobotMorphology = QUADRIPOD if cfg.ExperimentConfig.morphology is 
 # ---------------------------------------------------------------------------
 
 def build_model(
-    morph:           RobotMorphology = STATIC_MORPH,
-    floor_clearance: float = 0.0,
-    photorealistic:  bool  = cfg.ExperimentConfig.photorealistic,
+    morph:             RobotMorphology = STATIC_MORPH,
+    floor_clearance:   float = 0.0,
+    photorealistic:    bool  = cfg.ExperimentConfig.photorealistic,
+    origin_tile_rgba:  tuple = cfg.ExperimentConfig.origin_tile_rgba,
+    origin_tile_size:  float = cfg.ExperimentConfig.origin_tile_size,
 ):
     """
     Build a ready-to-step `mujoco.MjModel` for the static morphology.
@@ -65,14 +67,21 @@ def build_model(
 
     Parameters
     ----------
-    morph           : the static morphology (defaults to STATIC_MORPH).
-    floor_clearance : extra clearance above z=0 for the torso/body parts.
-    photorealistic  : grass + sky textures (mirrors Morphology's flag).
+    morph             : the static morphology (defaults to STATIC_MORPH).
+    floor_clearance   : extra clearance above z=0 for the torso/body parts.
+    photorealistic    : grass + sky textures (mirrors Morphology's flag).
+    origin_tile_rgba  : RGBA colour of the spawn-position marker tile.
+    origin_tile_size  : half-extent (m) of the marker tile.
     """
     import copy
     m = copy.deepcopy(morph)
     m.spawn_height = compute_spawn_height(m, floor_clearance=floor_clearance)
-    manager = MorphologyManager(floor_texrepeat=256, photorealistic=photorealistic)
+    manager = MorphologyManager(
+        floor_texrepeat  = 256,
+        photorealistic   = photorealistic,
+        origin_tile_rgba = origin_tile_rgba,
+        origin_tile_size = origin_tile_size,
+    )
     return manager.get_model(m), m
 
 

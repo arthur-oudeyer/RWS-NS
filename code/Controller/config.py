@@ -63,7 +63,7 @@ class ExperimentConfig:
 
     # ---- Identity -----------------------------------------------------------
     run_id:        str = ""
-    seed:          int = 13
+    seed:          int = 14
     description:   str = ""
     strategy:      str = "mu_lambda"   # "mu_lambda" | "map_elite"
 
@@ -83,6 +83,7 @@ class ExperimentConfig:
 
     # ---- Reward weights (defaults; mutation σ controls per-gen jitter) -------
     # Default vector — opinionated starting prior. See instruction.md §5.
+    # Original 7 terms
     rw_forward_velocity: float = 1.0
     rw_lateral_drift:    float = 0.1
     rw_upright_bonus:    float = 0.5
@@ -90,6 +91,17 @@ class ExperimentConfig:
     rw_contact_reward:   float = 0.1
     rw_alive_bonus:      float = 0.05
     rw_fall_penalty:     float = 10.0
+    # Extended 10 terms (small positive so log-normal mutation can activate them)
+    rw_no_contact_reward:           float = 0.05
+    rw_torso_height_reward:         float = 0.05
+    rw_torso_rotation_reward:       float = 0.01
+    rw_torso_tilting_speed_reward:  float = 0.01
+    rw_limb_coordination_reward:    float = 0.05
+    rw_nervosity_reward:            float = 0.01
+    rw_smooth_reward:               float = 0.05
+    rw_vertical_velocity_reward:    float = 0.05
+    rw_lateral_velocity_reward:     float = 0.01
+    rw_joint_range_reward:          float = 0.01
 
     # Mutation σ for the per-generation log-normal noise on each weight.
     # σ_init is used to widen the *initial* population around the default
@@ -120,9 +132,24 @@ class ExperimentConfig:
 
     # ---- Video / VLM render -------------------------------------------------
     video_fps:           int  = 20
-    render_width:        int  = 192
+    render_width:        int  = 192   # per-camera; total video width = 2 × this
     render_height:       int  = 192
-    camera_track_torso:  bool = True
+    camera_track_torso:  bool = False
+
+    # Origin tile — colored marker at (0,0) so the VLM can gauge displacement.
+    origin_tile_rgba:    tuple = (0.4, 0.55, 0.5, 0.5)  # grey-green
+    origin_tile_size:    float = 0.3                    # half-extent in metres
+
+    # Camera 1 — ground-level side view (azimuth 90 = right side of robot)
+    cam1_azimuth:    float = 90.0
+    cam1_elevation:  float = 0.0     # 0 = perfectly horizontal; camera is at lookat height
+    cam1_distance:   float = 3.0
+    cam1_lookat_z:   float = 0.12    # look at leg height so camera sits near ground level
+
+    # Camera 2 — diagonal front view; gives VLM a second spatial reference
+    cam2_azimuth:    float = 60.0
+    cam2_elevation:  float = -25.0
+    cam2_distance:   float = 2.0
 
     # ---- Grader -------------------------------------------------------------
     use_fake_grader = False
@@ -180,13 +207,23 @@ class ExperimentConfig:
     def default_reward_weights_dict(self) -> dict:
         """The starting reward-weight vector as a plain dict."""
         return {
-            "forward_velocity": self.rw_forward_velocity,
-            "lateral_drift":    self.rw_lateral_drift,
-            "upright_bonus":    self.rw_upright_bonus,
-            "energy_penalty":   self.rw_energy_penalty,
-            "contact_reward":   self.rw_contact_reward,
-            "alive_bonus":      self.rw_alive_bonus,
-            "fall_penalty":     self.rw_fall_penalty,
+            "forward_velocity":          self.rw_forward_velocity,
+            "lateral_drift":             self.rw_lateral_drift,
+            "upright_bonus":             self.rw_upright_bonus,
+            "energy_penalty":            self.rw_energy_penalty,
+            "contact_reward":            self.rw_contact_reward,
+            "alive_bonus":               self.rw_alive_bonus,
+            "fall_penalty":              self.rw_fall_penalty,
+            "no_contact_reward":         self.rw_no_contact_reward,
+            "torso_height_reward":       self.rw_torso_height_reward,
+            "torso_rotation_reward":     self.rw_torso_rotation_reward,
+            "torso_tilting_speed_reward": self.rw_torso_tilting_speed_reward,
+            "limb_coordination_reward":  self.rw_limb_coordination_reward,
+            "nervosity_reward":          self.rw_nervosity_reward,
+            "smooth_reward":             self.rw_smooth_reward,
+            "vertical_velocity_reward":  self.rw_vertical_velocity_reward,
+            "lateral_velocity_reward":   self.rw_lateral_velocity_reward,
+            "joint_range_reward":        self.rw_joint_range_reward,
         }
 
     # ---- Display ------------------------------------------------------------

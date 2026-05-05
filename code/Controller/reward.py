@@ -15,18 +15,28 @@ Each term is signed so that a *positive weight always means "more of this
 is better"*. Log-normal mutation can never flip a term's role — the
 human-chosen direction of each term is part of the prior.
 
-Components (in the default 7-dim vector)
-----------------------------------------
-  forward_velocity : +v_x of the torso (forward progress)
-  lateral_drift    : −|v_y| of the torso (penalises sideways drift)
-  upright_bonus    : cos(roll) * cos(pitch) (rewards staying upright)
-  energy_penalty   : −sum(action²) (control cost)
-  contact_reward   : +number of feet in ground contact
-  alive_bonus      : +1 per step the robot has not fallen
-  fall_penalty     : one-off −1 the step the torso drops below threshold
+Components (17-dim vector)
+--------------------------
+  forward_velocity          : +v_x of the torso (forward progress)
+  lateral_drift             : −|v_y| of the torso (penalises sideways drift)
+  upright_bonus             : cos(roll)*cos(pitch) (rewards staying upright)
+  energy_penalty            : −sum(action²) (control cost)
+  contact_reward            : +number of feet in ground contact
+  alive_bonus               : +1 per step the robot has not fallen
+  fall_penalty              : one-off −1 when torso drops below threshold
+  no_contact_reward         : airborne fraction of feet [0,1]
+  torso_height_reward       : raw torso z (rewards tall/jumping posture)
+  torso_rotation_reward     : |ω_z| torso spin around vertical axis
+  torso_tilting_speed_reward: ‖ω_xy‖ torso roll/pitch angular speed
+  limb_coordination_reward  : exp(−std(hip_velocities)) — uniform leg rhythm
+  nervosity_reward          : mean|Δaction| — rewards jerky/fast changes
+  smooth_reward             : exp(−mean|Δaction|) — rewards smooth control
+  vertical_velocity_reward  : v_z of torso (rewards going upward / jumping)
+  lateral_velocity_reward   : |v_y| of torso (rewards sideways crab-walk)
+  joint_range_reward        : std(hip_angles) — rewards wide-range postures
 
-The signs are baked into compute_step_reward() — weights are always added
-multiplied by a non-negative term, then negated when the *intent* is a
+The signs are baked into compute_step_reward() — weights always multiply a
+non-negative term, then the whole term is negated when the *intent* is a
 penalty (energy_penalty, lateral_drift, fall_penalty). Mutation acts on the
 weight magnitude only.
 
@@ -67,28 +77,47 @@ class RewardWeights:
     These are stored verbatim in the archive. Default values come from
     `ExperimentConfig.default_reward_weights_dict()`.
     """
-    forward_velocity: float = 1.0     # rewards +v_x torso
-    lateral_drift:    float = 0.1     # penalises |v_y| torso
-    upright_bonus:    float = 0.5     # rewards upright posture
+    # ---- Original 7 terms -------------------------------------------------------
+    forward_velocity: float = 1.0    # rewards +v_x torso
+    lateral_drift:    float = 0.1    # penalises |v_y| torso
+    upright_bonus:    float = 0.5    # rewards upright posture
     energy_penalty:   float = 0.01   # penalises sum(action**2)
-    contact_reward:   float = 0.1     # rewards feet in contact
-    alive_bonus:      float = 0.05    # rewards every alive step
-    fall_penalty:     float = 10.0    # one-off penalty on fall
+    contact_reward:   float = 0.1    # rewards feet in contact
+    alive_bonus:      float = 0.05   # rewards every alive step
+    fall_penalty:     float = 10.0   # one-off penalty on fall
 
-    # To implement :
-    no_contact_reward: float = 0.1  # rewards feet in the air
-    torso_height_reward: float = 0.1 # Reward when the torso is high (z axis)
-    torso_rotation_reward: float = 0.1 # reward when the torso is rotating (around the z axis)
-    torso_tilting_speed_reward: float = 0.1  # Reward when the torso have angular speed (around x / y axis)
-    limb_coordination_reward: float = 0.1  # Reward as much as the limbs (attached to torso) are in the same position to each other
-    # Maybe others ?
+    # ---- Extended 10 terms (small positive defaults so log-normal mutation ----
+    # ---- can activate them; set to 0 in config.py to fully disable)  ---------
 
-    nervosity_reward: float = 0.1 # Reward when the articulation speed change quicly a lot (huge acceleration)
-    smooth_reward: float = 0.1  # Reward when the articulation speed is not changing a lot (small acceleration)
+    # Airborne fraction of feet [0,1]: promotes hopping / jumping
+    no_contact_reward: float = 0.05
 
-    # To rename :
-    # lateral_drift -> lateral_drift_penalty
-    # forward_velocity -> forward_velocity_reward
+    # Raw torso z height: promotes tall posture or jumping
+    torso_height_reward: float = 0.05
+
+    # |ω_z|: rewards spinning around the vertical axis
+    torso_rotation_reward: float = 0.01
+
+    # ‖ω_xy‖: rewards rolling / tilting (angular speed in roll+pitch plane)
+    torso_tilting_speed_reward: float = 0.01
+
+    # exp(−std(hip_vels)) ∈ [0,1]: rewards limbs swinging in unison
+    limb_coordination_reward: float = 0.05
+
+    # mean|Δaction| per step: rewards twitchy / high-acceleration control
+    nervosity_reward: float = 0.01
+
+    # exp(−mean|Δaction|) ∈ [0,1]: rewards smooth, low-jerk control
+    smooth_reward: float = 0.05
+
+    # v_z of torso: rewards upward movement (jumping impulse)
+    vertical_velocity_reward: float = 0.05
+
+    # |v_y| of torso: rewards lateral movement (crab-walk, side-step)
+    lateral_velocity_reward: float = 0.01
+
+    # std(hip_angles): rewards diverse joint configurations (acrobatics)
+    joint_range_reward: float = 0.01
 
     # ---- vector form ------------------------------------------------------
 
@@ -173,26 +202,28 @@ def _quat_upright_factor(quat_wxyz: np.ndarray) -> float:
 
 
 def compute_step_reward(
-    weights: RewardWeights,
-    sensors: "RobotSensorReading",
-    action:  np.ndarray,
-    fell:    bool,
+    weights:     RewardWeights,
+    sensors:     "RobotSensorReading",
+    action:      np.ndarray,
+    prev_action: np.ndarray,
+    fell:        bool,
 ) -> float:
     """
     Shaped per-step reward used by PPO inside one training run.
 
-    This function is called every env step; the per-step reward shape is
-    parameterised by `weights`, which is the evolved variable. The
-    per-term sign convention (described at module top) is hard-coded
-    here — weights only scale magnitudes.
+    `prev_action` is the clipped action from the previous step (zeros on the
+    first step after reset). It is used to compute action jerk for the
+    nervosity / smooth terms.
     """
     vx = float(sensors.torso_velocity[0])
     vy = float(sensors.torso_velocity[1])
+    vz = float(sensors.torso_velocity[2])
 
     upright = _quat_upright_factor(sensors.torso_orientation)
     energy  = float(np.sum(np.square(action)))
     contact = float(sensors.n_contacts)
 
+    # ---- Original 7 terms -------------------------------------------------------
     r = (
           weights.forward_velocity * vx
         - weights.lateral_drift    * abs(vy)
@@ -201,6 +232,46 @@ def compute_step_reward(
         + weights.contact_reward   * contact
         + weights.alive_bonus
     )
+
+    # ---- Extended terms ---------------------------------------------------------
+
+    # Airborne fraction: how many feet are NOT on the ground, in [0, 1]
+    n_feet = max(1, sensors.n_feet_total)
+    airborne = max(0.0, float(n_feet - contact) / n_feet)
+    r += weights.no_contact_reward * airborne
+
+    # Torso height (raw z value)
+    r += weights.torso_height_reward * float(sensors.torso_height)
+
+    # Torso spin around vertical axis
+    r += weights.torso_rotation_reward * abs(float(sensors.torso_angular_velocity[2]))
+
+    # Torso roll/pitch angular speed
+    tilt_speed = float(np.linalg.norm(sensors.torso_angular_velocity[:2]))
+    r += weights.torso_tilting_speed_reward * tilt_speed
+
+    # Limb coordination: exp(−std) ∈ (0, 1], 1.0 = all joints in perfect unison
+    if len(sensors.hip_velocities) > 1:
+        coordination = float(np.exp(-np.std(sensors.hip_velocities)))
+    else:
+        coordination = 1.0
+    r += weights.limb_coordination_reward * coordination
+
+    # Action jerk (mean absolute change from previous action)
+    jerk = float(np.mean(np.abs(action - prev_action)))
+    r += weights.nervosity_reward * jerk
+    r += weights.smooth_reward    * float(np.exp(-jerk))   # exp(−jerk) ∈ (0, 1]
+
+    # Vertical velocity (rewards moving upward)
+    r += weights.vertical_velocity_reward * vz
+
+    # Lateral velocity (rewards sideways movement)
+    r += weights.lateral_velocity_reward * abs(vy)
+
+    # Joint angle diversity (rewards wide range of postures)
+    if len(sensors.hip_angles) > 1:
+        r += weights.joint_range_reward * float(np.std(sensors.hip_angles))
+
     if fell:
         r -= weights.fall_penalty
     return r
@@ -262,11 +333,17 @@ if __name__ == "__main__":
     # 5. Reward sanity (no MuJoCo): build a fake sensor reading
     print("\n[5] compute_step_reward sanity (no MuJoCo)\n")
     class _FakeSensors:
-        torso_velocity    = np.array([1.0, -0.2, 0.0])
-        torso_orientation = np.array([1.0, 0.0, 0.0, 0.0])  # upright
-        n_contacts        = 4
-    r_alive = compute_step_reward(rw, _FakeSensors(), np.zeros(4), fell=False)
-    r_fell  = compute_step_reward(rw, _FakeSensors(), np.zeros(4), fell=True)
+        torso_velocity         = np.array([1.0, -0.2, 0.1])
+        torso_orientation      = np.array([1.0, 0.0, 0.0, 0.0])  # upright
+        torso_angular_velocity = np.array([0.1, 0.0, 0.5])
+        torso_height           = 0.3
+        n_contacts             = 4
+        n_feet_total           = 4
+        hip_velocities         = np.array([0.5, -0.3, 0.5, -0.3])
+        hip_angles             = np.array([0.1, -0.1, 0.2, -0.2])
+    prev = np.zeros(4)
+    r_alive = compute_step_reward(rw, _FakeSensors(), np.zeros(4), prev, fell=False)
+    r_fell  = compute_step_reward(rw, _FakeSensors(), np.zeros(4), prev, fell=True)
     print(f"  upright + moving fwd, fell=False : r = {r_alive:+.5f}")
     print(f"  same step  but   fell=True  : r = {r_fell:+.5f}")
     assert r_fell < r_alive, "fall penalty must lower reward"

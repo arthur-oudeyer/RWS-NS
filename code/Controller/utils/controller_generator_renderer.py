@@ -131,13 +131,25 @@ class TrainParams:
 # ---------------------------------------------------------------------------
 
 _RW_SLIDER_CFG: dict[str, tuple] = {
-    "forward_velocity": (0.0,  5.0,  0.05),
-    "lateral_drift":    (0.0,  2.0,  0.01),
-    "upright_bonus":    (0.0,  5.0,  0.05),
-    "energy_penalty":   (0.0,  0.1,  0.001),
-    "contact_reward":   (0.0,  2.0,  0.01),
-    "alive_bonus":      (0.0,  1.0,  0.005),
-    "fall_penalty":     (0.0, 50.0,  0.5),
+    # ---- Original 7 terms ----
+    "forward_velocity":           (0.0,  5.0,  0.05),
+    "lateral_drift":              (0.0,  2.0,  0.01),
+    "upright_bonus":              (0.0,  5.0,  0.05),
+    "energy_penalty":             (0.0,  0.1,  0.001),
+    "contact_reward":             (0.0,  2.0,  0.01),
+    "alive_bonus":                (0.0,  1.0,  0.005),
+    "fall_penalty":               (0.0, 50.0,  0.5),
+    # ---- Extended 10 terms ----
+    "no_contact_reward":          (0.0,  2.0,  0.01),
+    "torso_height_reward":        (0.0,  5.0,  0.05),
+    "torso_rotation_reward":      (0.0,  2.0,  0.01),
+    "torso_tilting_speed_reward": (0.0,  2.0,  0.01),
+    "limb_coordination_reward":   (0.0,  2.0,  0.01),
+    "nervosity_reward":           (0.0,  2.0,  0.01),
+    "smooth_reward":              (0.0,  2.0,  0.01),
+    "vertical_velocity_reward":   (0.0,  5.0,  0.05),
+    "lateral_velocity_reward":    (0.0,  2.0,  0.01),
+    "joint_range_reward":         (0.0,  2.0,  0.01),
 }
 
 # Default values shown on startup
@@ -667,25 +679,28 @@ class ControllerTrainerApp:
             _result_queue.put(("progress", 1.0))
             _result_queue.put(("status", "  Rolling out to video…"))
 
+            rollout_seed = int(np.random.randint(0, 2**31))
             from mujoco_env import RobotControllerEnv
             env = RobotControllerEnv(
                 reward_weights   = rw,
-                seed             = 0,
+                seed             = rollout_seed,
                 episode_duration = self.params.episode_duration,
                 render_mode      = "rgb_array",
                 render_width     = _cfg.render_width,
                 render_height    = _cfg.render_height,
             )
-            rollout_to_video(model, env, video_path, fps=_cfg.video_fps)
+            actual_video_path, _rollout_info = rollout_to_video(
+                model, env, video_path, fps=_cfg.video_fps
+            )
             env.close()
 
-            frames   = _extract_frames(video_path)
+            frames   = _extract_frames(actual_video_path)
             n_this   = (self.params.n_init_steps if mode in ("scratch", "manual")
                         else self.params.n_warm_steps)
             _result_queue.put(("done", IndividualResult(
                 reward_weights      = rw,
                 policy_path         = policy_path,
-                video_path          = video_path,
+                video_path          = actual_video_path,
                 fitness             = float(fitness),
                 n_steps             = n_this,
                 total_steps_trained = n_this,
@@ -729,24 +744,27 @@ class ControllerTrainerApp:
             _result_queue.put(("progress", 1.0))
             _result_queue.put(("status", "  Rolling out to video…"))
 
+            rollout_seed = int(np.random.randint(0, 2**31))
             from mujoco_env import RobotControllerEnv
             env = RobotControllerEnv(
                 reward_weights   = rw,
-                seed             = 0,
+                seed             = rollout_seed,
                 episode_duration = self.params.episode_duration,
                 render_mode      = "rgb_array",
                 render_width     = _cfg.render_width,
                 render_height    = _cfg.render_height,
             )
-            rollout_to_video(model, env, video_path, fps=_cfg.video_fps)
+            actual_video_path, _rollout_info = rollout_to_video(
+                model, env, video_path, fps=_cfg.video_fps
+            )
             env.close()
 
-            frames = _extract_frames(video_path)
+            frames = _extract_frames(actual_video_path)
             total  = parent.total_steps_trained + n_steps
             _result_queue.put(("done", IndividualResult(
                 reward_weights      = rw,
                 policy_path         = policy_path,
-                video_path          = video_path,
+                video_path          = actual_video_path,
                 fitness             = float(fitness),
                 n_steps             = n_steps,
                 total_steps_trained = total,

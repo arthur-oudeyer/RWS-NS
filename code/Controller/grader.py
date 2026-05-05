@@ -249,6 +249,7 @@ class LocomotionGrader:
         videos:           "list[tuple[str, str]]",
         debug:            Optional[bool]      = None,
         reference_video:  Optional[str]       = None,
+        print_prompt:     Optional[bool]      = False
     ) -> "dict[str, GraderOutput]":
         """
         Score multiple MP4s in one (chunked) Gemini call.
@@ -298,7 +299,9 @@ class LocomotionGrader:
                         contents.append(f"{vid}:")
                         contents.append(_genai_types.Part.from_uri(
                             file_uri=vfile.uri, mime_type="video/mp4"))
-                    contents.append(self._build_batch_prompt(ids, has_reference=ref_file is not None))
+                    prompt = self._build_batch_prompt(ids, has_reference=ref_file is not None)
+                    if print_prompt: print(prompt)
+                    contents.append(prompt)
 
                     if dbg:
                         ref_str = " + reference" if ref_file else ""
@@ -427,9 +430,9 @@ class LocomotionGrader:
         def _score(key: str) -> float:
             val = parsed.get(key, {})
             if isinstance(val, dict):
-                return float(val.get("score", 0)) / 100.0
+                return float(val.get("score", 0))
             try:
-                return float(val) / 100.0
+                return float(val)
             except (TypeError, ValueError):
                 return 0.0
 

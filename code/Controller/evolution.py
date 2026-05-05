@@ -181,7 +181,6 @@ class BaseEvolution(ABC):
             rollout_to_video(
                 policy, env, mp4,
                 fps                = self.cfg.video_fps,
-                camera_track_torso = self.cfg.camera_track_torso,
                 deterministic      = True,
             )
             return mp4

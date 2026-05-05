@@ -45,7 +45,6 @@ def rollout_to_video(
     env,
     save_path:           str,
     fps:                 int  = 20,
-    camera_track_torso:  bool = True,
     deterministic:       bool = True,
     max_steps:           Optional[int] = None,
 ) -> tuple[str, dict]:
@@ -78,9 +77,6 @@ def rollout_to_video(
     # state. RobotControllerEnv tolerates this — render() will lazily build
     # the renderer on first call.
     env.render_mode = "rgb_array"
-    if hasattr(env, "_render_camera") and not camera_track_torso:
-        # If the caller wants a static camera, hold lookat at world origin.
-        env._render_camera.lookat[:] = [0.0, 0.0, 0.2]
 
     obs, _ = env.reset()
 
@@ -109,11 +105,6 @@ def rollout_to_video(
 
     thread = threading.Thread(target=_encoder_worker, daemon=True)
     thread.start()
-
-    # Enforce static-camera Z so the torso doesn't disappear out the bottom
-    # of the frame if the policy makes the robot bounce.
-    if hasattr(env, "_render_camera"):
-        env._render_camera.lookat[2] = 0.2
 
     n_frames     = 0
     total_reward = 0.0
@@ -153,7 +144,6 @@ def rollout_to_video(
         "truncated":    truncated,
         "total_reward": total_reward,
     }
-
 
 # ---------------------------------------------------------------------------
 # Debug

@@ -490,9 +490,9 @@ thread). Camera follows the torso so the VLM sees the gait clearly.
 `LocomotionPromptConfig` mirroring `GeminiPromptConfig`. Replace
 "resemble a {static_target}" with behavioural criteria like:
 
-- `coherence` — does the gait look stable, periodic, controlled?
-- `progress` — does the robot make consistent forward progress?
-- `interest` — is the gait pattern interesting or biologically plausible?
+- `coherence` — does the gait look relevant toward the target?
+- `originality` — does the robot make specific unconventional movement?
+- `interest` — is the gait pattern interesting or biologically plausible and gives a real potential for optimization toward the target?
 
 Same JSON output schema, same fitness formula
 (`fitness = weighted_sum / (10 * sum_of_weights)`).

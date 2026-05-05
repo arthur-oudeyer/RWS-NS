@@ -455,9 +455,17 @@ class MorphologyManager:
     floor_texrepeat : checker tile density on the floor texture.
     """
 
-    def __init__(self, floor_texrepeat: int = 128, photorealistic: bool = False):
+    def __init__(
+        self,
+        floor_texrepeat:  int            = 128,
+        photorealistic:   bool           = False,
+        origin_tile_rgba: Optional[tuple] = None,
+        origin_tile_size: float           = 0.5,
+    ):
         self.floor_texrepeat  = floor_texrepeat
         self.photorealistic   = photorealistic
+        self.origin_tile_rgba = origin_tile_rgba
+        self.origin_tile_size = origin_tile_size
 
     # ------------------------------------------------------------------
     # Static helpers
@@ -779,6 +787,18 @@ class MorphologyManager:
 
         ET.SubElement(worldbody, "geom",
             name="floor", type="plane", size="100 100 0.1", material="floor_mat")
+
+        if self.origin_tile_rgba is not None:
+            s = self.origin_tile_size
+            ET.SubElement(worldbody, "geom",
+                name        = "origin_tile",
+                type        = "box",
+                pos         = f"0 0 0.001",
+                size        = f"{s} {s} 0.001",
+                rgba        = self._rgba(self.origin_tile_rgba),
+                contype     = "0",
+                conaffinity = "0",
+            )
 
         torso, joint_names = self._build_torso(morph)
         worldbody.append(torso)
