@@ -259,8 +259,77 @@ HEXAPOD = RobotMorphology(
     torso_b=0.14,
 )
 
+TRIPOD_COMPLEX = RobotMorphology(
+    name  = "tripod_complex",
+    legs  = [
+        LegDescriptor(0.0, [JointDescriptor(rgba=(0.3, 0.6, 0.9, 1.0), length=0.2)]),
+        LegDescriptor(120.0, [JointDescriptor(rgba=(0.3, 0.7, 0.4, 1.0), length=0.2)]),
+        LegDescriptor(240.0, [JointDescriptor(rgba=(0.8, 0.3, 0.3, 1.0), length=0.2)]),
+        LegDescriptor(  placement_angle_deg = 0.0,
+                        joints              = [JointDescriptor(rgba=(0.4, 0.7, 0.9, 1.0), length=0.1, rest_angle=0.1)],
+                        parent_leg_idx      = 0,
+                        parent_joint_idx    = 0),
+        LegDescriptor(  placement_angle_deg = 120.0,
+                        joints              = [JointDescriptor(rgba=(0.4, 0.8, 0.5, 1.0), length=0.1, rest_angle=0.1)],
+                        parent_leg_idx      = 1,
+                        parent_joint_idx    = 0),
+        LegDescriptor(  placement_angle_deg=240.0,
+                        joints=[JointDescriptor(rgba=(0.9, 0.4, 0.4, 1.0), length=0.1, rest_angle=0.1)],
+                        parent_leg_idx=2,
+                        parent_joint_idx=0),
+        ],
+    torso_a=0.14,
+    torso_b=0.14,
+)
+
+HUMAN = RobotMorphology(
+    name  = "human",
+    legs  = [
+        # ---- Legs -------------------------------------------------------
+        LegDescriptor(90.0,  [JointDescriptor(rgba=(0.3, 0.6, 0.9, 1.0), length=0.05, rest_angle=-1., ctrl_range=(-1.2, -0.8))]),
+        LegDescriptor(270.0, [JointDescriptor(rgba=(0.3, 0.7, 0.4, 1.0), length=0.05, rest_angle=-1., ctrl_range=(-1.2, -0.8))]),
+        LegDescriptor(placement_angle_deg=0.0,
+                      joints=[JointDescriptor(rgba=(0.4, 0.7, 0.9, 1.0), length=0.05, rest_angle=1., ctrl_range=(0.8, 1.2))],
+                      parent_leg_idx=0, parent_joint_idx=0),
+        LegDescriptor(placement_angle_deg=0.0,
+                      joints=[JointDescriptor(rgba=(0.4, 0.8, 0.5, 1.0), length=0.05, rest_angle=1., ctrl_range=(0.8, 1.2))],
+                      parent_leg_idx=1, parent_joint_idx=0),
+        LegDescriptor(placement_angle_deg=90.0,
+                      joints=[JointDescriptor(rgba=(0.4, 0.7, 0.9, 1.0), length=0.13, rest_angle=0., ctrl_range=(-0.78, 0.78))],
+                      parent_leg_idx=2, parent_joint_idx=0),
+        LegDescriptor(placement_angle_deg=90.0,
+                      joints=[JointDescriptor(rgba=(0.4, 0.8, 0.5, 1.0), length=0.13, rest_angle=0., ctrl_range=(-0.78, 0.78))],
+                      parent_leg_idx=3, parent_joint_idx=0),
+        LegDescriptor(placement_angle_deg=0.0,
+                      joints=[JointDescriptor(rgba=(0.4, 0.7, 0.9, 1.0), length=0.13, rest_angle=0., ctrl_range=(-0.78, 0.78))],
+                      parent_leg_idx=4, parent_joint_idx=0),
+        LegDescriptor(placement_angle_deg=0.0,
+                      joints=[JointDescriptor(rgba=(0.4, 0.8, 0.5, 1.0), length=0.13, rest_angle=0., ctrl_range=(-0.78, 0.78))],
+                      parent_leg_idx=5, parent_joint_idx=0),
+        # ---- Spine (root, points UP at rest: rest_angle ≈ -π) -----------
+        LegDescriptor(0.0, [JointDescriptor(rgba=(0.5, 0.1, 0.1, 1.0), length=0.2, rest_angle=-3.14, ctrl_range=(-3.3, -3.0))]),
+        # ---- Arms -----------
+        LegDescriptor(80.0, [JointDescriptor(rgba=(0.1, 0.5, 0.1, 1.0), length=0.3, rest_angle=2.35, ctrl_range=(0.78, 3.0))], parent_leg_idx=8, parent_joint_idx=0),
+        LegDescriptor(280.0, [JointDescriptor(rgba=(0.1, 0.5, 0.1, 1.0), length=0.3, rest_angle=2.35, ctrl_range=(0.78, 3.0))], parent_leg_idx=8, parent_joint_idx=0),
+    ],
+    # Head — rigid ellipsoid at the tip of the spine (leg 8).
+    # No foot sphere is generated for leg 8 when a body_part is listed here.
+    body_parts = [
+        BodyPartDescriptor(
+            parent_leg_idx = 8,
+            a     = 0.07,    # front-back semi-axis (m)
+            b     = 0.06,    # left-right semi-axis (m)
+            c     = 0.08,    # top-bottom semi-axis (m)
+            rgba  = (1.0, 1.0, 1.0, 1.0),   # skin colour
+        ),
+    ],
+    torso_a=0.03,
+    torso_b=0.06,
+    torso_c=0.03,
+)
+
 def get_preconfigured_morph(name: str):
-    for mo in (QUADRIPOD, TRIPOD, HEXAPOD):
+    for mo in (QUADRIPOD, TRIPOD, HEXAPOD, TRIPOD_COMPLEX, HUMAN):
         if mo.name == name:
             return mo
     print(f"ERROR : morphology '{name}' not found. -> Default {QUADRIPOD.name}")

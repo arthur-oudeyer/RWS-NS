@@ -156,7 +156,7 @@ class ExperimentConfig:
 
     # ---- Descriptor (VLM-based MapElite feature assessment) -----------------
     # Name of a DescriptorConfig from descriptor.py; "" = structural-only mode.
-    descriptor_config_name: str = "generic_descriptors"
+    descriptor_config_name: str = "lamp_descriptors"
 
     # ---- Output -------------------------------------------------------------
     output_dir:            str  = "results"

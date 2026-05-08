@@ -65,6 +65,13 @@ def build_model(
     and at least one foot rests on it. We mutate a deep copy so the module-
     level `STATIC_MORPH` is never modified.
 
+    After the formula-based estimate, a physics verification step runs
+    forward kinematics at the rest pose and checks whether any foot geom
+    sits underground. If so, `spawn_height` is corrected and the model is
+    rebuilt. This is necessary for morphologies with complex branched chains
+    (e.g. HUMAN) where the simple `length * cos(rest_angle)` formula
+    underestimates the true Z-drop.
+
     Parameters
     ----------
     morph             : the static morphology (defaults to STATIC_MORPH).
@@ -74,6 +81,8 @@ def build_model(
     origin_tile_size  : half-extent (m) of the marker tile.
     """
     import copy
+    import mujoco as _mj
+
     m = copy.deepcopy(morph)
     m.spawn_height = compute_spawn_height(m, floor_clearance=floor_clearance)
     manager = MorphologyManager(
@@ -82,7 +91,45 @@ def build_model(
         origin_tile_rgba = origin_tile_rgba,
         origin_tile_size = origin_tile_size,
     )
-    return manager.get_model(m), m
+    model = manager.get_model(m)
+
+    # Physics-based spawn height correction.
+    # Run FK at the rest pose and find the lowest foot-sphere bottom in world Z.
+    # If it is below z=0, shift the torso up by that amount and rebuild once.
+    #
+    # Joint names must be set in qpos order (depth-first XML tree), NOT leg order.
+    # For branched morphologies (HUMAN) these differ, so we look up each joint
+    # by name at its qpos slot, mirroring the approach in mujoco_env.__init__.
+    _rest_by_name: dict[str, float] = {}
+    for _li, _leg in enumerate(m.legs):
+        for _ji, _jd in enumerate(_leg.joints):
+            _n = (f"hip{_li + 1}" if len(_leg.joints) == 1
+                  else f"leg{_li + 1}_j{_ji + 1}")
+            _rest_by_name[_n] = _jd.rest_angle
+
+    n_joints = sum(len(leg.joints) for leg in m.legs)
+    data = _mj.MjData(model)
+    data.qpos[2] = m.spawn_height
+    for _qi in range(n_joints):
+        _jid   = _qi + 1
+        _jname = _mj.mj_id2name(model, _mj.mjtObj.mjOBJ_JOINT, _jid)
+        if _jname and _jname in _rest_by_name:
+            data.qpos[7 + _qi] = _rest_by_name[_jname]
+    _mj.mj_forward(model, data)
+
+    lowest_z = 0.0
+    for gi in range(model.ngeom):
+        name = _mj.mj_id2name(model, _mj.mjtObj.mjOBJ_GEOM, gi)
+        if name and name.startswith("foot") and name.endswith("_geom"):
+            radius  = float(model.geom_size[gi, 0])
+            bottom  = float(data.geom_xpos[gi, 2]) - radius
+            lowest_z = min(lowest_z, bottom)
+
+    if lowest_z < 0.0:
+        m.spawn_height -= lowest_z   # push torso up by penetration depth
+        model = manager.get_model(m)
+
+    return model, m
 
 
 def get_static_morph() -> RobotMorphology:

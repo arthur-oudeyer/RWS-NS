@@ -490,7 +490,7 @@ class ControllerTrainerApp:
 
         # ---- Training section ----
         section("Training")
-        add_slider(self.params, "n_init_steps",     "Init steps",   50_000, 3_000_000, 50_000, True)
+        add_slider(self.params, "n_init_steps",     "Init steps",   0, 3_000_000, 50_000, True)
         add_slider(self.params, "n_warm_steps",     "Warm steps",   50_000,  1_000_000, 50_000, True)
         add_slider(self.params, "n_envs",           "Envs",         1,       8,     1,     True)
         note("Envs: parallel MuJoCo instances.\nMore = faster but more CPU/RAM.")

@@ -145,7 +145,7 @@ def build_morphology_prompt(static_target: str, dynamic_target: str) -> str:
     Step 3 — Score
     Score each dimension using only the static image evidence.
     Be conservative. Do not infer runtime behavior from a single frame. 
-    Avoid OVERGRADING, let space for better morphology further improvement (A medium morphology cannot have more the ~60/100 in overall).
+    Avoid OVERGRADING, let space for better morphology further improvement (A medium morphology cannot have more than ~60/100 in overall).
     
     SCORING RULES:
     

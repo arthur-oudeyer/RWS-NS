@@ -112,7 +112,7 @@ def train_from_scratch(
     learning_rate:     float = 3e-4,
     gamma:             float = 0.99,
     gae_lambda:        float = 0.95,
-    ent_coef:          float = 0.0,
+    ent_coef:          float = 0.01,
     vf_coef:           float = 0.5,
     n_steps_per_env:   int   = 2048,
     batch_size:        int   = 256,

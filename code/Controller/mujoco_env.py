@@ -170,7 +170,50 @@ class RobotControllerEnv(gym.Env):
         self._data = mujoco.MjData(self._model)
 
         self._n_joints = self._morph.n_joints
-        self._n_feet   = len(self._morph.legs)
+        # Legs that carry a body part (e.g. head on spine) have no foot sphere;
+        # exclude them from the feet count used by the airborne-fraction term.
+        _body_part_parents = {bp.parent_leg_idx for bp in self._morph.body_parts}
+        self._n_feet = sum(1 for i in range(len(self._morph.legs)) if i not in _body_part_parents)
+
+        # Joint info keyed by name, built from the morphology in leg order.
+        _jnt_info: dict[str, tuple] = {}
+        for _li, _leg in enumerate(self._morph.legs):
+            for _ji, _jd in enumerate(_leg.joints):
+                _jname = (f"hip{_li + 1}" if len(_leg.joints) == 1
+                          else f"leg{_li + 1}_j{_ji + 1}")
+                _jnt_info[_jname] = (_jd.rest_angle, _jd.ctrl_range[0], _jd.ctrl_range[1])
+
+        # MuJoCo assigns joints in depth-first XML body-tree order (qpos order).
+        # Actuators follow leg order (the XML actuator block iterates morph.legs).
+        # For root-only morphologies (QUADRIPOD) both orders are the same.
+        # For branched morphologies (HUMAN) they differ, so we build arrays in
+        # qpos order by looking up each joint's name at its qpos slot.
+        self._rest_angles    = np.zeros(self._n_joints, dtype=np.float64)
+        _ctrl_low_init       = np.zeros(self._n_joints, dtype=np.float64)
+        _ctrl_high_init      = np.zeros(self._n_joints, dtype=np.float64)
+        _act_name_to_qi: dict[str, int] = {}
+        for _qi in range(self._n_joints):
+            _jid   = _qi + 1  # joint 0 is the freejoint "root"
+            _jname = mujoco.mj_id2name(self._model, mujoco.mjtObj.mjOBJ_JOINT, _jid)
+            if _jname and _jname in _jnt_info:
+                _ra, _cl, _ch = _jnt_info[_jname]
+                self._rest_angles[_qi] = _ra
+                _ctrl_low_init[_qi]    = _cl
+                _ctrl_high_init[_qi]   = _ch
+                _act_name_to_qi[f"servo_{_jname}"] = _qi
+        self._ctrl_low_init  = _ctrl_low_init
+        self._ctrl_high_init = _ctrl_high_init
+
+        # Permutation: _ctrl_to_qpos[i] = qpos index of the joint driven by ctrl[i].
+        # Used in step() to reorder qpos-order targets into ctrl order before
+        # assigning to data.ctrl.  Identity for root-only morphologies.
+        _ctrl_to_qpos = np.arange(self._n_joints, dtype=int)
+        for _ai in range(self._model.nu):
+            _aname = mujoco.mj_id2name(self._model, mujoco.mjtObj.mjOBJ_ACTUATOR, _ai)
+            if _aname and _aname in _act_name_to_qi:
+                _ctrl_to_qpos[_ai] = _act_name_to_qi[_aname]
+        self._ctrl_to_qpos = _ctrl_to_qpos
+
         self._timestep = float(self._model.opt.timestep)
         self._physics_steps_per_action = max(
             1, int(round(1.0 / (self.control_frequency * self._timestep)))
@@ -197,9 +240,10 @@ class RobotControllerEnv(gym.Env):
         )
 
         # Internal episode state
-        self._step_idx      = 0
-        self._sim_time      = 0.0
-        self._prev_action   = np.zeros(self._n_joints, dtype=np.float32)
+        self._step_idx           = 0
+        self._sim_time           = 0.0
+        self._prev_action        = np.zeros(self._n_joints, dtype=np.float32)
+        self._initial_torso_pos  = np.zeros(3, dtype=np.float64)  # set on first reset()
         self._renderer:     Optional[mujoco.Renderer] = None
         self._renderer2:    Optional[mujoco.Renderer] = None
 
@@ -231,11 +275,20 @@ class RobotControllerEnv(gym.Env):
         mujoco.mj_resetData(self._model, self._data)
         # Drop the torso at the computed spawn height (rest-pose feet on floor).
         self._data.qpos[2] = self._morph.spawn_height
-        # Tiny initial joint noise so PPO sees a non-degenerate start.
+        # Initialise each joint to its rest_angle (the pose used to compute
+        # spawn_height) plus a tiny jitter, clipped to the actuator ctrl_range.
+        # Without this, joints start at 0 and the geometry may penetrate the
+        # floor, causing an explosive launch on the first physics step.
         if self._n_joints > 0:
             jitter = self._np_random.uniform(-0.05, 0.05, size=self._n_joints)
-            self._data.qpos[7 : 7 + self._n_joints] = jitter
+            init_qpos = np.clip(
+                self._rest_angles + jitter,
+                self._ctrl_low_init, self._ctrl_high_init,
+            )
+            self._data.qpos[7 : 7 + self._n_joints] = init_qpos
         mujoco.mj_forward(self._model, self._data)
+        # Snapshot the spawn position for reward terms that need a reference.
+        self._initial_torso_pos = self._data.qpos[0:3].copy()
 
         self._step_idx    = 0
         self._sim_time    = 0.0
@@ -250,10 +303,14 @@ class RobotControllerEnv(gym.Env):
         prev_action = self._prev_action  # snapshot before physics step
 
         # Convert action (Δ-angle proxy in [-1, 1]) to a target hip angle.
+        # hip_angles and action are both in qpos order; ctrl is in actuator/leg order.
+        # _ctrl_to_qpos reindexes from ctrl slots to qpos slots so targets reach
+        # the correct actuators even for branched morphologies (HUMAN).
         sensors_pre = _read_sensors(self._model, self._data, self._n_joints, self._n_feet)
-        target = sensors_pre.hip_angles + self._delta_scale * action
-        target = np.clip(target, self._ctrl_low, self._ctrl_high)
-        self._data.ctrl[:] = target
+        target_qpos = sensors_pre.hip_angles + self._delta_scale * action
+        target_ctrl = target_qpos[self._ctrl_to_qpos]
+        target_ctrl = np.clip(target_ctrl, self._ctrl_low, self._ctrl_high)
+        self._data.ctrl[:] = target_ctrl
 
         # Step physics N substeps so the policy fires at control_frequency.
         for _ in range(self._physics_steps_per_action):
@@ -269,7 +326,8 @@ class RobotControllerEnv(gym.Env):
         self._fell = self._fell or fell_now
 
         reward = compute_step_reward(
-            self.reward_weights, sensors, action, prev_action, fell_transition
+            self.reward_weights, sensors, action, prev_action, fell_transition,
+            initial_torso_position=self._initial_torso_pos,
         )
         self._prev_action = action
 

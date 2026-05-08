@@ -202,11 +202,12 @@ def _quat_upright_factor(quat_wxyz: np.ndarray) -> float:
 
 
 def compute_step_reward(
-    weights:     RewardWeights,
-    sensors:     "RobotSensorReading",
-    action:      np.ndarray,
-    prev_action: np.ndarray,
-    fell:        bool,
+    weights:              RewardWeights,
+    sensors:              "RobotSensorReading",
+    action:               np.ndarray,
+    prev_action:          np.ndarray,
+    fell:                 bool,
+    initial_torso_position: Optional[np.ndarray] = None,
 ) -> float:
     """
     Shaped per-step reward used by PPO inside one training run.
@@ -214,7 +215,14 @@ def compute_step_reward(
     `prev_action` is the clipped action from the previous step (zeros on the
     first step after reset). It is used to compute action jerk for the
     nervosity / smooth terms.
+
+    `initial_torso_position` is the torso (x, y, z) at spawn. Currently used
+    so that torso_height_reward rewards height relative to the spawn pose —
+    positive only when above 90 % of spawn z — but the full 3-D vector is
+    available for future reward terms (e.g. displacement from origin).
+    Pass None (default) to fall back to raw torso-z behaviour.
     """
+    _init_z = float(initial_torso_position[2]) if initial_torso_position is not None else 0.0
     vx = float(sensors.torso_velocity[0])
     vy = float(sensors.torso_velocity[1])
     vz = float(sensors.torso_velocity[2])
@@ -240,8 +248,8 @@ def compute_step_reward(
     airborne = max(0.0, float(n_feet - contact) / n_feet)
     r += weights.no_contact_reward * airborne
 
-    # Torso height (raw z value)
-    r += weights.torso_height_reward * float(sensors.torso_height)
+    # Torso height relative to spawn: positive only above 90 % of initial z.
+    r += weights.torso_height_reward * (float(sensors.torso_height) - 0.9 * _init_z)
 
     # Torso spin around vertical axis
     r += weights.torso_rotation_reward * abs(float(sensors.torso_angular_velocity[2]))

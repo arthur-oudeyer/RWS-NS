@@ -964,4 +964,4 @@ if __name__ == "__main__":
     print(grader._build_batch_prompt(fake_ids, has_reference=True))
 
     print(f"\n{SEP2}")
-    print("  Done — no API calls made.")
+    print("  Done.  ")
