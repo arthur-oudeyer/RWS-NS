@@ -102,6 +102,12 @@ class ExperimentConfig:
     rw_vertical_velocity_reward:    float = 0.05
     rw_lateral_velocity_reward:     float = 0.01
     rw_joint_range_reward:          float = 0.01
+    rw_height_target_reward:        float = 0.3
+    rw_tilt_penalty:                float = 0.2
+    rw_tilt_rate_penalty:           float = 0.1
+    rw_all_feet_planted_bonus:      float = 0.2
+    rw_vertical_velocity_penalty:     float = 0.05
+    rw_horizontal_velocity_penalty:    float = 0.05
 
     # Mutation σ for the per-generation log-normal noise on each weight.
     # σ_init is used to widen the *initial* population around the default
@@ -142,14 +148,14 @@ class ExperimentConfig:
 
     # Camera 1 — ground-level side view (azimuth 90 = right side of robot)
     cam1_azimuth:    float = 90.0
-    cam1_elevation:  float = 0.0     # 0 = perfectly horizontal; camera is at lookat height
-    cam1_distance:   float = 3.0
-    cam1_lookat_z:   float = 0.12    # look at leg height so camera sits near ground level
+    cam1_elevation:  float = -5.0     # 0 = perfectly horizontal; camera is at lookat height
+    cam1_distance:   float = 4.0
+    cam1_lookat_z:   float = 0.1    # look at leg height so camera sits near ground level
 
     # Camera 2 — diagonal front view; gives VLM a second spatial reference
     cam2_azimuth:    float = 60.0
-    cam2_elevation:  float = -25.0
-    cam2_distance:   float = 2.0
+    cam2_elevation:  float = -30.0
+    cam2_distance:   float = 4.0
 
     # ---- Grader -------------------------------------------------------------
     use_fake_grader = False
@@ -217,13 +223,19 @@ class ExperimentConfig:
             "no_contact_reward":         self.rw_no_contact_reward,
             "torso_height_reward":       self.rw_torso_height_reward,
             "torso_rotation_reward":     self.rw_torso_rotation_reward,
-            "torso_tilting_speed_reward": self.rw_torso_tilting_speed_reward,
+            "torso_tilting_speed_reward":self.rw_torso_tilting_speed_reward,
             "limb_coordination_reward":  self.rw_limb_coordination_reward,
             "nervosity_reward":          self.rw_nervosity_reward,
             "smooth_reward":             self.rw_smooth_reward,
             "vertical_velocity_reward":  self.rw_vertical_velocity_reward,
             "lateral_velocity_reward":   self.rw_lateral_velocity_reward,
             "joint_range_reward":        self.rw_joint_range_reward,
+            "height_target_reward":      self.rw_height_target_reward,
+            "tilt_penalty":              self.rw_tilt_penalty,
+            "tilt_rate_penalty":         self.rw_tilt_rate_penalty,
+            "all_feet_planted_bonus":    self.rw_all_feet_planted_bonus,
+            "vertical_velocity_penalty":   self.rw_vertical_velocity_penalty,
+            "horizontal_velocity_penalty": self.rw_horizontal_velocity_penalty,
         }
 
     # ---- Display ------------------------------------------------------------

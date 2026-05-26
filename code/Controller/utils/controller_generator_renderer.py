@@ -124,6 +124,7 @@ class TrainParams:
     reward_init_sigma: float = _cfg.reward_init_sigma
     reward_mut_sigma:  float = _cfg.reward_mutation_sigma
     device:            str   = _DEFAULT_DEVICE
+    fall_height:        float = _cfg.fall_height
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +151,13 @@ _RW_SLIDER_CFG: dict[str, tuple] = {
     "vertical_velocity_reward":   (0.0,  5.0,  0.05),
     "lateral_velocity_reward":    (0.0,  2.0,  0.01),
     "joint_range_reward":         (0.0,  2.0,  0.01),
+    # ---- Standing-specific terms ----
+    "height_target_reward":       (0.0,  5.0,  0.05),
+    "tilt_penalty":               (0.0,  5.0,  0.05),
+    "tilt_rate_penalty":          (0.0,  2.0,  0.01),
+    "all_feet_planted_bonus":     (0.0,  1.0,  0.01),
+    "vertical_velocity_penalty":    (0.0,  1.0,  0.01),
+    "horizontal_velocity_penalty":    (0.0,  5.0,  0.01),
 }
 
 # Default values shown on startup
@@ -240,6 +248,55 @@ class _TrainingCallback(_SB3Callback):
 
 
 # ---------------------------------------------------------------------------
+# Policy-load helper
+# ---------------------------------------------------------------------------
+
+def _find_reward_json(policy_zip: str) -> Optional[dict]:
+    """
+    Try to locate companion reward weights for a saved policy zip.
+
+    Search order:
+      1. reward_NNNN.json in the same folder as the zip (same index).
+      2. reward_NNNN.json in _REWARD_DIR (same index).
+      3. Any entry in log.jsonl whose "policy_path" matches exactly.
+
+    Returns the parsed dict on success, or None if nothing is found.
+    """
+    p       = Path(policy_zip)
+    parts   = p.stem.split("_")
+    idx_str = parts[-1] if parts and parts[-1].isdigit() else None
+
+    candidates: list[Path] = []
+    if idx_str:
+        candidates.append(p.parent   / f"reward_{idx_str}.json")
+        candidates.append(_REWARD_DIR / f"reward_{idx_str}.json")
+
+    for cand in candidates:
+        if cand.exists():
+            try:
+                with open(cand) as f:
+                    return json.load(f)
+            except Exception:
+                pass
+
+    # Fall back to scanning the session log for a matching policy_path entry.
+    if _LOG_FILE.exists():
+        try:
+            with open(_LOG_FILE) as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line.strip())
+                        if entry.get("policy_path") == str(policy_zip):
+                            return entry
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Main application
 # ---------------------------------------------------------------------------
 
@@ -272,8 +329,9 @@ class ControllerTrainerApp:
     _SAVE_BG = "#2d5a3a";  _SAVE_FG = "#ccffdd"
     _MAN_BG  = "#5a3a1a";  _MAN_FG  = "#ffd8a8"
     _CONT_BG = "#3a3a1a";  _CONT_FG = "#ffff88"
+    _LOAD_BG = "#3a1a4a";  _LOAD_FG = "#ffccff"
 
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk, preload_path: Optional[str] = None):
         self.root   = root
         self.rng    = np.random.default_rng()
         self.params = TrainParams()
@@ -302,6 +360,8 @@ class ControllerTrainerApp:
         # Enable New button immediately — no individual needed to start
         self._set_buttons_enabled(True)
         self._poll()
+        if preload_path:
+            self.root.after(300, lambda: self._trigger_load(preload_path))
 
     # ------------------------------------------------------------------
     # UI construction
@@ -378,12 +438,17 @@ class ControllerTrainerApp:
         self._btn_mutate.grid(  row=0, column=2, sticky="ew", padx=3)
         self._btn_continue.grid(row=0, column=3, sticky="ew", padx=3)
 
-        # Action row: Manual | Save | Skip
+        # Action row: Load | Manual | Save | Skip
         act = tk.Frame(left, bg=self._BG, pady=3)
         act.pack(side=tk.TOP, fill=tk.X)
-        for i in range(3):
+        for i in range(4):
             act.columnconfigure(i, weight=1)
 
+        self._btn_load = tk.Button(
+            act, text="^ Load  [L]",
+            bg=self._LOAD_BG, fg=self._LOAD_FG,
+            activebackground="#6a2a7a", activeforeground="#fff",
+            command=self._on_load, **btn_cfg)
         self._btn_manual = tk.Button(
             act, text="Edit Weights  [T]",
             bg=self._MAN_BG, fg=self._MAN_FG,
@@ -399,15 +464,17 @@ class ControllerTrainerApp:
             bg=self._SKIP_BG, fg=self._FG,
             activebackground="#555", activeforeground="#fff",
             command=self._on_skip, **btn_cfg)
-        self._btn_manual.grid(row=0, column=0, sticky="ew", padx=3)
-        self._btn_save.grid(  row=0, column=1, sticky="ew", padx=3)
-        self._btn_skip.grid(  row=0, column=2, sticky="ew", padx=3)
+        self._btn_load.grid(  row=0, column=0, sticky="ew", padx=3)
+        self._btn_manual.grid(row=0, column=1, sticky="ew", padx=3)
+        self._btn_save.grid(  row=0, column=2, sticky="ew", padx=3)
+        self._btn_skip.grid(  row=0, column=3, sticky="ew", padx=3)
 
         # Keyboard shortcuts
         for key, cb in (
             ("<n>", self._on_new),       ("<N>", self._on_new),
             ("<m>", self._on_mutate),    ("<M>", self._on_mutate),
             ("<c>", self._on_continue),  ("<C>", self._on_continue),
+            ("<l>", self._on_load),      ("<L>", self._on_load),
             ("<t>", self._on_manual),    ("<T>", self._on_manual),
             ("<s>", self._on_skip),      ("<S>", self._on_skip),
             ("<space>", self._on_skip),
@@ -490,9 +557,10 @@ class ControllerTrainerApp:
 
         # ---- Training section ----
         section("Training")
-        add_slider(self.params, "n_init_steps",     "Init steps",   0, 3_000_000, 50_000, True)
-        add_slider(self.params, "n_warm_steps",     "Warm steps",   50_000,  1_000_000, 50_000, True)
+        add_slider(self.params, "n_init_steps",     "Init steps",   0, 10_000_000, 250_000, True)
+        add_slider(self.params, "n_warm_steps",     "Warm steps",   0,  5_000_000, 100_000, True)
         add_slider(self.params, "n_envs",           "Envs",         1,       8,     1,     True)
+        add_slider(self.params, "fall_height", "Fall Height", 0., 0.3, 0.025, False)
         note("Envs: parallel MuJoCo instances.\nMore = faster but more CPU/RAM.")
         add_slider(self.params, "episode_duration", "Episode (s)",  1.0,    10.0,   0.5,   False)
 
@@ -657,6 +725,7 @@ class ControllerTrainerApp:
                     verbose          = 0,
                     callback         = cb,
                     device           = self.params.device,
+                    fall_height      = self.params.fall_height,
                 )
             else:
                 _result_queue.put(("status",
@@ -673,6 +742,7 @@ class ControllerTrainerApp:
                     verbose            = 0,
                     callback           = cb,
                     device             = self.params.device,
+                    fall_height=self.params.fall_height,
                 )
 
             # Signal progress bar full before rollout starts
@@ -710,10 +780,13 @@ class ControllerTrainerApp:
         except Exception as exc:
             _result_queue.put(("error", str(exc)))
 
-    def _run_continue(self, parent: IndividualResult):
+    def _run_continue(self, parent: IndividualResult, use_current_slider=True):
         """Continue training the current individual (same weights, warm start)."""
         try:
-            rw      = parent.reward_weights
+            if use_current_slider:
+                rw = RewardWeights(**{n: float(v.get()) for n, v in self._rw_slider_vars.items()})
+            else:
+                rw = parent.reward_weights
             n_steps = self.params.n_warm_steps
 
             _POLICY_DIR.mkdir(parents=True, exist_ok=True)
@@ -739,6 +812,7 @@ class ControllerTrainerApp:
                 verbose            = 0,
                 callback           = cb,
                 device             = self.params.device,
+                fall_height        = self.params.fall_height,
             )
 
             _result_queue.put(("progress", 1.0))
@@ -890,7 +964,8 @@ class ControllerTrainerApp:
 
         # Title
         mode_label = {"scratch": "from scratch", "warm": "warm start",
-                      "manual": "manual weights", "continue": "continue"
+                      "manual": "manual weights", "continue": "continue",
+                      "loaded": "loaded policy"
                       }.get(self._training_mode, self._training_mode)
         title = f"{mode_label}   fitness = {fitns[-1]:+.2f}   step {steps[-1]:,} / {x_max:,}"
         self._canvas.create_text(cw // 2, PT // 2, text=title,
@@ -972,6 +1047,81 @@ class ControllerTrainerApp:
         self._start_training("continue")
         threading.Thread(target=lambda: self._run_continue(parent), daemon=True).start()
 
+    def _on_load(self):
+        if self._training:
+            return
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            title="Load policy (.zip)",
+            filetypes=[("SB3 Policy", "*.zip"), ("All files", "*.*")],
+            initialdir=str(_SCRIPT_DIR),
+        )
+        if path:
+            self._trigger_load(path)
+
+    def _trigger_load(self, path: str):
+        self._start_training("loaded")
+        threading.Thread(target=lambda: self._run_load(path), daemon=True).start()
+
+    def _run_load(self, policy_zip: str):
+        """Load an existing policy zip, run a rollout preview, and set as current."""
+        try:
+            p = Path(policy_zip)
+            _result_queue.put(("status", f"  Loading {p.name}…"))
+
+            # Locate companion reward weights (reward_NNNN.json or log entry).
+            reward_data = _find_reward_json(policy_zip)
+            if reward_data and "reward_weights" in reward_data:
+                rw          = RewardWeights.from_dict(reward_data["reward_weights"])
+                total_steps = int(reward_data.get("total_steps_trained", 0))
+            else:
+                rw          = RewardWeights(**_RW_DEFAULTS)
+                total_steps = 0
+
+            from stable_baselines3 import PPO
+            from mujoco_env import RobotControllerEnv
+
+            rollout_seed = int(np.random.randint(0, 2**31))
+            env = RobotControllerEnv(
+                reward_weights   = rw,
+                seed             = rollout_seed,
+                episode_duration = self.params.episode_duration,
+                render_mode      = "rgb_array",
+                render_width     = _cfg.render_width,
+                render_height    = _cfg.render_height,
+            )
+            model = PPO.load(policy_zip, env=env, device=self.params.device)
+
+            _result_queue.put(("progress", 0.4))
+            _result_queue.put(("status", "  Rolling out loaded policy to video…"))
+
+            _VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+            idx        = _next_idx(_VIDEO_DIR, "video_*.mp4")
+            video_path = str(_VIDEO_DIR / f"video_{idx:04d}.mp4")
+
+            actual_video_path, rollout_info = rollout_to_video(
+                model, env, video_path, fps=_cfg.video_fps
+            )
+            env.close()
+
+            frames  = _extract_frames(actual_video_path)
+            fitness = float(rollout_info.get("total_reward", 0.0))
+
+            _result_queue.put(("progress", 1.0))
+            _result_queue.put(("done", IndividualResult(
+                reward_weights      = rw,
+                policy_path         = policy_zip,
+                video_path          = actual_video_path,
+                fitness             = fitness,
+                n_steps             = 0,
+                total_steps_trained = total_steps,
+                mode                = "loaded",
+                frames              = frames,
+            )))
+        except Exception as exc:
+            import traceback
+            _result_queue.put(("error", traceback.format_exc()))
+
     def _on_skip(self):
         if self._training:
             return
@@ -1043,6 +1193,7 @@ class ControllerTrainerApp:
             "warm":     "Mutating weights + warm-start training…",
             "manual":   "Training on manual weights…",
             "continue": "Continuing training (warm start)…",
+            "loaded":   "Loading policy + running rollout preview…",
         }[mode]
         self._show_canvas_message(label)
 
@@ -1081,6 +1232,7 @@ class ControllerTrainerApp:
         self._btn_new.config(     state=tk.NORMAL if enabled  else tk.DISABLED)
         self._btn_mutate.config(  state=tk.NORMAL if needs_c  else tk.DISABLED)
         self._btn_continue.config(state=tk.NORMAL if needs_c  else tk.DISABLED)
+        self._btn_load.config(    state=tk.NORMAL if enabled  else tk.DISABLED)
         self._btn_manual.config(  state=tk.NORMAL if enabled  else tk.DISABLED)
         self._btn_prev.config(    state=tk.NORMAL if (enabled and has_h) else tk.DISABLED)
         self._btn_save.config(    state=tk.NORMAL if needs_c  else tk.DISABLED)
@@ -1129,14 +1281,26 @@ def main():
         print("ERROR: mujoco required.  pip install mujoco")
         sys.exit(1)
 
-    # Clear study_output on every launch for a clean session
+    # Optional positional argument: path to a policy .zip to load on startup.
+    #   python3 controller_generator_renderer.py policy_saves/policy_0010.zip
+    preload_path: Optional[str] = None
+    if len(sys.argv) > 1:
+        arg = sys.argv[1]
+        if not Path(arg).exists():
+            print(f"ERROR: policy file not found: {arg}")
+            sys.exit(1)
+        preload_path = arg
+        print(f"  Pre-loading policy: {arg}")
+
+    # Clear study_output on every launch for a clean session.
+    # Pre-loaded policies live outside this folder, so nothing is lost.
     if _OUT_ROOT.exists():
         shutil.rmtree(_OUT_ROOT)
     _OUT_ROOT.mkdir(parents=True)
 
     root = tk.Tk()
     root.geometry("1120x730")
-    ControllerTrainerApp(root)
+    ControllerTrainerApp(root, preload_path=preload_path)
     root.protocol("WM_DELETE_WINDOW", root.destroy)
     root.mainloop()
 

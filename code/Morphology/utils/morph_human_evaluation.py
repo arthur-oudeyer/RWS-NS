@@ -336,7 +336,7 @@ class MorphEvalApp:
         for criterion, label, color in (
             ("coherence",   "Coherence   — matches target",    "#88aaff"),
             ("originality", "Originality — structural novelty", "#ffaa44"),
-            ("interest",    "Interest    — evol. potential",   "#88ff88"),
+            ("potential",    "potential    — evol. potential",   "#88ff88"),
         ):
             var = tk.IntVar(value=5)
             self._score_vars[criterion] = var
@@ -493,7 +493,7 @@ class MorphEvalApp:
             "human_scores": {
                 "coherence":   self._score_vars["coherence"].get(),
                 "originality": self._score_vars["originality"].get(),
-                "interest":    self._score_vars["interest"].get(),
+                "potential":    self._score_vars["potential"].get(),
             },
             "morphology":  morphology_to_dict(self._current_morph),
             "image_path":  img_rel,
@@ -507,7 +507,7 @@ class MorphEvalApp:
             f"  Saved {morph_id}  "
             f"[coh={entry['human_scores']['coherence']} "
             f"orig={entry['human_scores']['originality']} "
-            f"int={entry['human_scores']['interest']}]"
+            f"pot={entry['human_scores']['potential']}]"
         )
         self._set_buttons_enabled(False)
         self.root.after(10, self._do_generate)

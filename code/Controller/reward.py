@@ -15,7 +15,7 @@ Each term is signed so that a *positive weight always means "more of this
 is better"*. Log-normal mutation can never flip a term's role — the
 human-chosen direction of each term is part of the prior.
 
-Components (17-dim vector)
+Components (22-dim vector)
 --------------------------
   forward_velocity          : +v_x of the torso (forward progress)
   lateral_drift             : −|v_y| of the torso (penalises sideways drift)
@@ -34,6 +34,11 @@ Components (17-dim vector)
   vertical_velocity_reward  : v_z of torso (rewards going upward / jumping)
   lateral_velocity_reward   : |v_y| of torso (rewards sideways crab-walk)
   joint_range_reward        : std(hip_angles) — rewards wide-range postures
+  height_target_reward      : exp(−25·(h−h₀)²) ∈ (0,1] — Gaussian at spawn height
+  tilt_penalty              : −(1−upright)² — quadratic tilt penalty
+  tilt_rate_penalty         : −‖ω_xy‖² — quadratic penalty on tilting angular speed
+  all_feet_planted_bonus    : 1.0 when all feet contact ground simultaneously, else 0
+  vertical_velocity_penalty   : −vz² — penalises vertical body velocity (bouncing/falling)
 
 The signs are baked into compute_step_reward() — weights always multiply a
 non-negative term, then the whole term is negated when the *intent* is a
@@ -118,6 +123,30 @@ class RewardWeights:
 
     # std(hip_angles): rewards diverse joint configurations (acrobatics)
     joint_range_reward: float = 0.01
+
+    # ---- Standing-specific terms -----------------------------------------
+
+    # exp(−25·(h−h₀)²) ∈ (0,1]: Gaussian reward centred on spawn height;
+    # provides gradient from both above and below unlike the linear height term
+    height_target_reward: float = 0.3
+
+    # (1 − upright)²: quadratic tilt penalty, stronger than upright_bonus near
+    # horizontal and zero only when perfectly upright
+    tilt_penalty: float = 0.2
+
+    # ‖ω_xy‖²: quadratic penalty on torso roll/pitch angular speed;
+    # discourages the falling dynamics before they reach the fall threshold
+    tilt_rate_penalty: float = 0.1
+
+    # 1.0 when ALL feet contact ground simultaneously, 0.0 otherwise;
+    # stronger signal than contact_reward for bipedal/quadruped standing
+    all_feet_planted_bonus: float = 0.2
+
+    # vz²: penalises vertical body velocity (bouncing, uncontrolled drops)
+    vertical_velocity_penalty: float = 0.05
+
+    # vx / vy: penalises horizontal body velocity
+    horizontal_velocity_penalty: float = 0.05
 
     # ---- vector form ------------------------------------------------------
 
@@ -279,6 +308,27 @@ def compute_step_reward(
     # Joint angle diversity (rewards wide range of postures)
     if len(sensors.hip_angles) > 1:
         r += weights.joint_range_reward * float(np.std(sensors.hip_angles))
+
+    # ---- Standing-specific terms -----------------------------------------
+
+    # Gaussian reward centred on spawn height — gradient in both directions
+    h_target = _init_z if _init_z > 0.0 else float(sensors.torso_height)
+    r += weights.height_target_reward * float(np.exp(-25.0 * (float(sensors.torso_height) - h_target) ** 2))
+
+    # Quadratic tilt penalty — larger than upright_bonus near horizontal
+    r -= weights.tilt_penalty * float((1.0 - upright) ** 2)
+
+    # Quadratic tilt-rate penalty (tilt_speed already computed above)
+    r -= weights.tilt_rate_penalty * float(tilt_speed ** 2)
+
+    # All-feet-planted bonus
+    if sensors.n_feet_total > 0:
+        r += weights.all_feet_planted_bonus * float(sensors.n_contacts >= sensors.n_feet_total)
+
+    # velocity penalty (vz²)
+    r -= weights.vertical_velocity_penalty * float(vz ** 2)
+
+    r -= weights.horizontal_velocity_penalty * float(vx ** 2 + vy ** 2)
 
     if fell:
         r -= weights.fall_penalty

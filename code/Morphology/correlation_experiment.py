@@ -93,7 +93,7 @@ import numpy as np
 # ── constants ────────────────────────────────────────────────────────────────
 _DATASET_DIR  = _SCRIPT_DIR / "utils" / "human_eval_dataset"
 _DATASET_FILE = _DATASET_DIR / "dataset.json"
-DIMENSIONS    = ("coherence", "originality", "interest")
+DIMENSIONS    = ("coherence", "originality", "potential")
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +156,7 @@ def run_vlm_evaluation(
             name    = f"corr_{static_t.replace(' ', '_')[:20]}",
             target  = static_t,
             prompt  = build_morphology_prompt(static_t, dynamic_t),
-            weights = GeminiScoringWeights(coherence=1.0, originality=1.0, interest=1.0),
+            weights = GeminiScoringWeights(coherence=1.0, originality=0.5, potential=1.5),
         )
         grader = GeminiGrader(
             api_key       = api_key,
@@ -189,7 +189,7 @@ def run_vlm_evaluation(
             results[morph_id] = {
                 "coherence":          output.raw_scores.get("coherence",   0.0),
                 "originality":        output.raw_scores.get("originality", 0.0),
-                "interest":           output.raw_scores.get("interest",    0.0),
+                "potential":           output.raw_scores.get("potential",    0.0),
                 "fitness":            output.fitness,
                 "observation":        output.extra.get("observation",        ""),
                 "interpretation":     output.extra.get("interpretation",     ""),
@@ -200,7 +200,7 @@ def run_vlm_evaluation(
             if debug:
                 v = results[morph_id]
                 print(f"  {morph_id}: coh={v['coherence']:.2f}  "
-                      f"orig={v['originality']:.2f}  int={v['interest']:.2f}")
+                      f"orig={v['originality']:.2f}  pot={v['potential']:.2f}")
 
     return results
 
@@ -286,7 +286,7 @@ _DARK_BG2 = "#252525"
 _GRID     = "#333333"
 _SCATTER  = "#66aaff"
 _REGLINE  = "#ff8844"
-_TEXT_DIM = ("coherence", "#88aaff"), ("originality", "#ffaa44"), ("interest", "#88ff88"), ("overall", "#cccccc")
+_TEXT_DIM = ("coherence", "#88aaff"), ("originality", "#ffaa44"), ("potential", "#88ff88"), ("overall", "#cccccc")
 _DIM_COLOR = {d: c for d, c in _TEXT_DIM}
 
 

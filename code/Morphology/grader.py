@@ -674,7 +674,7 @@ class GeminiGrader(MorphologyGrader):
             '      "interpretation": "structural interpretation relative to the target",\n'
             '      "coherence":      { "score": <int 0-100>, "reason": "..." },\n'
             '      "originality":    { "score": <int 0-100>, "reason": "..." },\n'
-            '      "interest":       { "score": <int 0-100>, "reason": "..." }'
+            '      "potential":       { "score": <int 0-100>, "reason": "..." }'
             + (f',\n{desc_schema}' if desc_schema else "")
             + "\n    }"
         )
@@ -725,24 +725,24 @@ class GeminiGrader(MorphologyGrader):
 
         coherence   = _score("coherence")
         originality = _score("originality")
-        interest    = _score("interest")
+        potential    = _score("potential")
 
         w = self._prompt_config.weights
-        total_w = w.coherence + w.originality + w.interest
+        total_w = w.coherence + w.originality + w.potential
         fitness = (
-            w.coherence * coherence + w.originality * originality + w.interest * interest
+            w.coherence * coherence + w.originality * originality + w.potential * potential
         ) / (10.0 * total_w)
 
         if dbg:
             print(f"    coherence={coherence:.1f}  originality={originality:.1f}  "
-                  f"interest={interest:.1f}  → fitness={fitness:.4f}")
+                  f"potential={potential:.1f}  → fitness={fitness:.4f}")
 
         return GraderOutput(
             fitness=round(fitness, 6),
             raw_scores={
                 "coherence":   round(coherence, 4),
                 "originality": round(originality, 4),
-                "interest":    round(interest, 4),
+                "potential":    round(potential, 4),
             },
             method="gemini_batch",
             prompt_set=self._prompt_config.name,
@@ -751,7 +751,7 @@ class GeminiGrader(MorphologyGrader):
                 "interpretation":     parsed.get("interpretation", ""),
                 "coherence_reason":   _reason("coherence"),
                 "originality_reason": _reason("originality"),
-                "interest_reason":    _reason("interest"),
+                "potential_reason":    _reason("potential"),
                 "vlm_descriptors":    self._extract_vlm_descriptors(parsed),
             },
         )
@@ -840,21 +840,21 @@ class GeminiGrader(MorphologyGrader):
 
         coherence   = _extract_score("coherence")
         originality = _extract_score("originality")
-        interest    = _extract_score("interest")
+        potential    = _extract_score("potential")
 
         w = self._prompt_config.weights
-        total_w = w.coherence + w.originality + w.interest
+        total_w = w.coherence + w.originality + w.potential
         fitness = (
             w.coherence   * coherence
             + w.originality * originality
-            + w.interest    * interest
+            + w.potential    * potential
         ) / (10.0 * total_w)
         fitness = round(fitness, 6)
 
         raw_scores = {
             "coherence":   round(coherence,   4),
             "originality": round(originality, 4),
-            "interest":    round(interest,    4),
+            "potential":    round(potential,    4),
         }
 
         def _reason(key: str) -> str:
@@ -869,7 +869,7 @@ class GeminiGrader(MorphologyGrader):
             "interpretation":     parsed.get("interpretation", ""),
             "coherence_reason":   _reason("coherence"),
             "originality_reason": _reason("originality"),
-            "interest_reason":    _reason("interest"),
+            "potential_reason":    _reason("potential"),
             "vlm_descriptors":    vlm_descriptors,
         }
 
@@ -886,7 +886,7 @@ class GeminiGrader(MorphologyGrader):
                   f"target={self._prompt_config.target}")
             print(f"    coherence   = {coherence:.1f}  (w={w.coherence})")
             print(f"    originality = {originality:.1f}  (w={w.originality})")
-            print(f"    interest    = {interest:.1f}  (w={w.interest})")
+            print(f"    potential    = {potential:.1f}  (w={w.potential})")
             print(f"  → fitness = {fitness:.5f}")
             if extra.get("observation"):
                 print(f"  observation: {extra['observation'][:120]}")

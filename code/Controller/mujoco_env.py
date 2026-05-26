@@ -144,7 +144,7 @@ class RobotControllerEnv(gym.Env):
         seed:              Optional[int]           = None,
         episode_duration:  float                   = 5.0,
         control_frequency: int                     = 20,
-        fall_height:       float                   = 0.05,
+        fall_height:       float                   = 0.3,
         render_mode:       Optional[str]           = None,
         render_width:      int                     = 192,
         render_height:     int                     = 192,
