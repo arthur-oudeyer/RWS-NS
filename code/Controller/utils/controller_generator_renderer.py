@@ -157,7 +157,7 @@ _RW_SLIDER_CFG: dict[str, tuple] = {
     "tilt_rate_penalty":          (0.0,  2.0,  0.01),
     "all_feet_planted_bonus":     (0.0,  1.0,  0.01),
     "vertical_velocity_penalty":    (0.0,  1.0,  0.01),
-    "horizontal_velocity_penalty":    (0.0,  5.0,  0.01),
+    "horizontal_velocity_penalty":    (0.0,  20.0,  0.05),
 }
 
 # Default values shown on startup

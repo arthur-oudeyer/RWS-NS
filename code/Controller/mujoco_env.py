@@ -58,7 +58,7 @@ from reward import RewardWeights, compute_step_reward
 # Δ-angle scale: action ∈ [-1, 1] becomes a small target-angle delta.
 # We divide by control_frequency below so the per-step delta is reasonable
 # regardless of how often the policy fires.
-_PREDICTION_FACTOR = -20.0
+_PREDICTION_FACTOR = -60.0
 
 
 # ---------------------------------------------------------------------------
