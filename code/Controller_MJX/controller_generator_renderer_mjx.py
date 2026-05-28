@@ -119,10 +119,12 @@ _LOG_FILE    = _OUT_ROOT / "log.jsonl"
 
 @dataclass
 class TrainParams:
-    n_init_steps:      int   = min(_cfg.n_init_steps,  50_000)
-    n_warm_steps:      int   = min(_cfg.n_warm_steps,  20_000)
-    n_envs_mjx:        int   = _cfg.n_envs_mjx
-    rollout_len:       int   = 64
+    # Defaults tuned for Mac M2 CPU (MJX runs on CPU, not Metal).
+    # Scale up n_init_steps / n_envs_mjx when a GPU is available.
+    n_init_steps:      int   = 2_000
+    n_warm_steps:      int   = 1_000
+    n_envs_mjx:        int   = 4
+    rollout_len:       int   = 32
     episode_duration:  float = _cfg.episode_duration
     reward_init_sigma: float = _cfg.reward_init_sigma
     reward_mut_sigma:  float = _cfg.reward_mutation_sigma
@@ -218,11 +220,14 @@ def _timed_progress_thread(total_steps: int, stop_evt: threading.Event):
     purely cosmetic — it gives the user feedback that training is running.
     """
     t0 = time.perf_counter()
-    # Rough estimate: ~30s per 10k steps on Mac M2 CPU (2 envs, tiny arch)
-    est_seconds = max(10.0, total_steps / 400.0)
+    # Conservative estimate: first run pays JIT compilation (~30s on M2 CPU),
+    # then ~50 effective steps/s.  We cap display at 0.92 so the bar never
+    # "finishes" before training does — stop_evt.set() + ("progress", 1.0)
+    # is the authoritative completion signal.
+    est_seconds = max(30.0, total_steps / 50.0)
     while not stop_evt.is_set():
         elapsed = time.perf_counter() - t0
-        frac = min(0.95, elapsed / est_seconds)
+        frac = min(0.92, elapsed / est_seconds)
         _result_queue.put(("progress", frac))
         time.sleep(1.0)
 
@@ -327,16 +332,24 @@ def _run_training(
         save_params(trained_params, policy_path)
 
         _, rollout_info = rollout_to_video_mjx(
-            params        = trained_params,
-            cfg           = env_cfg,
-            mj_model      = mj_m,
-            save_path     = video_path,
-            fps           = _cfg.video_fps,
-            render_width  = _cfg.render_width,
-            render_height = _cfg.render_height,
-            policy_arch   = tuple(_cfg.policy_arch),
-            seed          = int(np.random.randint(0, 2**31)),
-            deterministic = True,
+            params               = trained_params,
+            cfg                  = env_cfg,
+            mj_model             = mj_m,
+            save_path            = video_path,
+            fps                  = _cfg.video_fps,
+            render_width         = _cfg.render_width,
+            render_height        = _cfg.render_height,
+            cam1_azimuth         = _cfg.cam1_azimuth,
+            cam1_elevation       = _cfg.cam1_elevation,
+            cam1_distance        = _cfg.cam1_distance,
+            cam1_lookat_z        = _cfg.cam1_lookat_z,
+            cam2_azimuth         = _cfg.cam2_azimuth,
+            cam2_elevation       = _cfg.cam2_elevation,
+            cam2_distance        = _cfg.cam2_distance,
+            camera_track_torso   = True,
+            policy_arch          = tuple(_cfg.policy_arch),
+            seed                 = int(np.random.randint(0, 2**31)),
+            deterministic        = True,
         )
 
         frames = _extract_frames(video_path)
@@ -382,16 +395,24 @@ def _run_load(policy_params_path: str, params: TrainParams):
         video_path = str(_VIDEO_DIR / f"video_{idx:04d}.mp4")
 
         _, rollout_info = rollout_to_video_mjx(
-            params        = loaded_params,
-            cfg           = env_cfg,
-            mj_model      = mj_m,
-            save_path     = video_path,
-            fps           = _cfg.video_fps,
-            render_width  = _cfg.render_width,
-            render_height = _cfg.render_height,
-            policy_arch   = tuple(_cfg.policy_arch),
-            seed          = 0,
-            deterministic = True,
+            params               = loaded_params,
+            cfg                  = env_cfg,
+            mj_model             = mj_m,
+            save_path            = video_path,
+            fps                  = _cfg.video_fps,
+            render_width         = _cfg.render_width,
+            render_height        = _cfg.render_height,
+            cam1_azimuth         = _cfg.cam1_azimuth,
+            cam1_elevation       = _cfg.cam1_elevation,
+            cam1_distance        = _cfg.cam1_distance,
+            cam1_lookat_z        = _cfg.cam1_lookat_z,
+            cam2_azimuth         = _cfg.cam2_azimuth,
+            cam2_elevation       = _cfg.cam2_elevation,
+            cam2_distance        = _cfg.cam2_distance,
+            camera_track_torso   = True,
+            policy_arch          = tuple(_cfg.policy_arch),
+            seed                 = 0,
+            deterministic        = True,
         )
 
         frames  = _extract_frames(video_path)
@@ -675,13 +696,13 @@ class ControllerTrainerMJXApp:
             cb()
 
         section("Training  [MJX]")
-        add_slider(self.params, "n_init_steps",     "Init steps",     0, 2_000_000, 10_000, True)
-        add_slider(self.params, "n_warm_steps",      "Warm steps",     0,   500_000,  5_000, True)
-        add_slider(self.params, "n_envs_mjx",        "n_envs (vmap)",  1,      1024,      1, True)
-        add_slider(self.params, "rollout_len",       "Rollout len",    8,      2048,      8, True)
+        add_slider(self.params, "n_init_steps",     "Init steps",     1_000, 2_000_000, 10_000, True)
+        add_slider(self.params, "n_warm_steps",      "Warm steps",     1_000,   500_000,  5_000, True)
+        add_slider(self.params, "n_envs_mjx",        "n_envs (vmap)",  1,      1024,      8, True)
+        add_slider(self.params, "rollout_len",       "Rollout len",    8,      2048,      16, True)
         add_slider(self.params, "episode_duration",  "Episode (s)",    1.0,    10.0,    0.5, False)
         add_slider(self.params, "fall_height",       "Fall height",    0.0,     0.5,   0.01, False)
-        note(f"JAX device: {_dev}\nn_envs: parallel envs via jax.vmap\nRollout: steps per PPO scan")
+        note(f"JAX device: {_dev}\nCPU defaults: 2k steps, 4 envs (quick).\nScale up for GPU runs.")
 
         separator()
         section("Mutation sigma")
