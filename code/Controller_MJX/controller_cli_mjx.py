@@ -55,6 +55,11 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 import os, sys
 
+# Headless rendering: use EGL (NVIDIA GPU offscreen) instead of GLFW/X11.
+# Must be set before mujoco is imported. Can be overridden:
+#   MUJOCO_GL=osmesa python controller_cli_mjx.py ...  (CPU fallback)
+os.environ.setdefault("MUJOCO_GL", "egl")
+
 # Allow override via env var (most common for shared machines):
 #   CUDA_VISIBLE_DEVICES=2 python controller_cli_mjx.py ...
 # The script itself does NOT expose a --gpu flag to avoid confusion

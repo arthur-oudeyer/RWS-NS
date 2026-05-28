@@ -41,6 +41,12 @@ Run this file directly for a smoke test (trains a tiny policy then renders).
 
 from __future__ import annotations
 
+import os
+# Headless rendering on GPU servers (no X11 display).
+# EGL uses the NVIDIA driver directly; osmesa is the CPU fallback.
+# Set MUJOCO_GL before mujoco is imported — setdefault so the caller can override.
+os.environ.setdefault("MUJOCO_GL", "egl")
+
 import queue
 import threading
 from functools import partial
