@@ -51,6 +51,16 @@ Output (cleared on every launch)
 
 from __future__ import annotations
 
+import os
+# Headless rendering fallback (GUI uses GLFW by default, so EGL only matters
+# if someone runs this on a remote box with X-forwarding off).
+os.environ.setdefault("MUJOCO_GL", "egl")
+# XLA optimizations (no-op on CPU/Metal; helps when run on a CUDA box).
+os.environ.setdefault("XLA_FLAGS",
+    "--xla_gpu_enable_cublaslt=true --xla_gpu_autotune_level=4"
+)
+os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.92")
+
 import json
 import queue
 import shutil
@@ -92,6 +102,13 @@ import jax.numpy as jnp
 
 _dev = _pick_mjx_device()
 jax.config.update("jax_default_device", _dev)
+
+# Persistent JIT cache — second run with same shapes skips XLA compile (~60s).
+_jax_cache_dir = os.path.expanduser("~/.cache/jax_mjx")
+os.makedirs(_jax_cache_dir, exist_ok=True)
+jax.config.update("jax_compilation_cache_dir", _jax_cache_dir)
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.0)
 
 
 # ---------------------------------------------------------------------------

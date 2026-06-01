@@ -115,38 +115,70 @@ n_updates = steps / (envs × rollout)
 
 ### Recommended parameters for RTX 2080 Ti (11 GB VRAM)
 
+After contact-buffer + arithmetic-intensity fixes, expected throughput on 2080Ti:
+
+| envs   | rollout | GPU-Util | Steady-state |
+|--------|---------|----------|--------------|
+| 1024   | 128     | ~36 %    | ~7 000 steps/s    |
+| 4096   | 128     | ~60 %    | ~20 000 steps/s   |
+| 8192   | 128     | ~90 %    | ~38 000 steps/s   |
+| 16384  | 64      | ~95 %    | ~50 000+ steps/s  |
+
 | Goal                          | --steps    | --envs | --rollout | Updates |
 |-------------------------------|-----------|--------|-----------|---------|
-| Quick behavior check (~2 min) | 1 000 000 | 512    | 128       | 15      |
-| Meaningful training (~5 min)  | 3 000 000 | 1024   | 128       | 23      |
-| Solid training (~15 min)      | 10 000 000| 1024   | 256       | 38      |
-| Full run (~1 hour)            | 50 000 000| 2048   | 256       | 95      |
+| Quick behavior check (~1 min) | 5 000 000 | 8192   | 128       |  5      |
+| Meaningful training (~3 min)  | 25 000 000| 8192   | 128       | 24      |
+| Solid training (~10 min)      | 75 000 000| 8192   | 128       | 71      |
+| Saturating (~30 min)          | 250 000 000| 8192  | 128       | 238     |
+
+### Why does `nvidia-smi` always show ~8500 MiB?
+
+That's **JAX's preallocator**, not actual usage. JAX grabs 92% of VRAM at startup
+(configurable via `XLA_PYTHON_CLIENT_MEM_FRACTION`) and manages allocations
+internally. To see real usage:
+
+```bash
+XLA_PYTHON_CLIENT_PREALLOCATE=false python controller_cli_mjx.py new ...
+```
+
+Without preallocation you'll see actual usage scale with `--envs`. Use it for
+debugging only — preallocation is faster at runtime.
 
 ### Tuning `--envs`
 
-More envs = better GPU utilisation up to a point; too many = VRAM overflow.
+Bigger is better up to GPU-Util saturation, then up to VRAM cap.
+For this morphology with rollout=128:
 
 ```bash
-# Find the sweet spot: increase until VRAM is ~80% full or fps stops rising
-nvidia-smi  # check MiB used after first update
-
-# Rough guide for 2080Ti (11 GB):
-#   --envs 512   → safe baseline
-#   --envs 1024  → likely sweet spot
-#   --envs 2048  → may hit VRAM limit depending on model size
+#   --envs  1024  → GPU-Util  ~36 %  (way under-utilized)
+#   --envs  4096  → GPU-Util  ~60 %
+#   --envs  8192  → GPU-Util  ~90 %  (recommended sweet spot)
+#   --envs 16384  → may OOM with rollout=128; try rollout=64
 ```
 
 ### Tuning `--rollout`
 
-Longer rollout = fewer JIT entries = higher effective GPU throughput.
-Tradeoff: longer rollout = noisier gradient estimates (usually acceptable).
-Recommended: 128 or 256.
+Longer rollout = better arithmetic intensity per JIT iteration BUT eats more
+VRAM (rollout buffer scales linearly).  With `envs=8192`:
+- `rollout=64`  → ~256 MB buffer, OK to push envs higher
+- `rollout=128` → ~512 MB buffer (recommended)
+- `rollout=256` → ~1 GB buffer, fewer envs
+
+### Persistent JIT cache
+
+The CLI now caches the XLA-compiled training kernel to `~/.cache/jax_mjx/`.
+First run compiles (~60 s), subsequent runs with the **same** `--envs/--rollout/
+--arch` skip compile entirely. Different params → different cache entry.
+
+If you ever want to clear it (e.g. after a JAX version upgrade):
+```bash
+rm -rf ~/.cache/jax_mjx
+```
 
 ### Warm-start is cheaper than from-scratch
 
-`mutate` reuses JIT-compiled kernels from the same session if run back-to-back.
-The first `new` in a session pays the compile cost; subsequent `mutate` calls
-on the same GPU are much cheaper.
+Within one CLI invocation, `mutate` reuses the in-memory JIT kernel. Across
+invocations, the persistent cache makes them equally fast after the first run.
 
 ---
 

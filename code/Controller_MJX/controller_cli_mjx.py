@@ -56,14 +56,24 @@ from __future__ import annotations
 import os, sys
 
 # Headless rendering: use EGL (NVIDIA GPU offscreen) instead of GLFW/X11.
-# Must be set before mujoco is imported. Can be overridden:
-#   MUJOCO_GL=osmesa python controller_cli_mjx.py ...  (CPU fallback)
+# Must be set before mujoco is imported. Override with MUJOCO_GL=osmesa for CPU.
 os.environ.setdefault("MUJOCO_GL", "egl")
 
-# Allow override via env var (most common for shared machines):
-#   CUDA_VISIBLE_DEVICES=2 python controller_cli_mjx.py ...
-# The script itself does NOT expose a --gpu flag to avoid confusion
-# with the env-var approach that the cluster users already know.
+# XLA GPU optimizations (must be set before jax import).
+#   - cublaslt: use the faster cuBLAS-LT path for small GEMMs (always a win
+#     for tiny matrices typical of small MLP policies).
+#   - autotune_level=4: maximum autotuning during JIT (slower compile, faster
+#     runtime). With the persistent cache below, the compile cost is paid once.
+os.environ.setdefault("XLA_FLAGS",
+    "--xla_gpu_enable_cublaslt=true "
+    "--xla_gpu_autotune_level=4"
+)
+
+# JAX preallocates 75% of GPU VRAM by default — this is why nvidia-smi shows
+# the same number regardless of n_envs. Bump to 0.92 to unlock more headroom
+# for larger n_envs scaling. Set XLA_PYTHON_CLIENT_PREALLOCATE=false from the
+# shell to see the actual usage instead.
+os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.92")
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
 
@@ -103,15 +113,30 @@ from config             import ExperimentConfig
 _dev = _pick_mjx_device()
 jax.config.update("jax_default_device", _dev)
 
+# Persistent JIT compilation cache.
+# Saves the ~60-80 s XLA compilation on every run after the first that uses
+# matching shapes (n_envs, rollout, policy_arch). The cache is keyed by the
+# abstract function signature — changing n_envs from 1024 to 8192 invalidates
+# the entry; reusing exact params hits the cache.
+# Typical cache size on disk: 50-200 MB per shape combination.
+_jax_cache_dir = os.path.expanduser("~/.cache/jax_mjx")
+os.makedirs(_jax_cache_dir, exist_ok=True)
+jax.config.update("jax_compilation_cache_dir", _jax_cache_dir)
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.0)
+
 _cfg = ExperimentConfig()
 
 # ---------------------------------------------------------------------------
 # Defaults (GPU-appropriate — much larger than M2 CPU defaults)
 # ---------------------------------------------------------------------------
 
-_DEFAULT_STEPS   = 200_000
-_DEFAULT_ENVS    = 512
-_DEFAULT_ROLLOUT = 64
+# Defaults tuned for RTX 2080Ti with the nconmax fix (10 contact slots).
+# Sweet spot empirically: envs=8192 saturates GPU-Util to ~90%.
+# rollout=128 gives ~24 PPO updates per 3M steps (enough to amortize JIT).
+_DEFAULT_STEPS   = 3_000_000
+_DEFAULT_ENVS    = 8192
+_DEFAULT_ROLLOUT = 128
 _DEFAULT_ARCH    = (256, 256)
 
 
