@@ -556,6 +556,203 @@ def make_env_fns(
 
 
 # ---------------------------------------------------------------------------
+# Fast-reset factory (no mjx.forward — for use inside training lax.scan)
+# ---------------------------------------------------------------------------
+
+def make_fast_reset_fn(cfg: MJXEnvConfig, n_envs: int) -> Any:
+    """
+    Return a JIT-compiled vmapped reset that skips mjx.forward.
+
+    The full _reset calls mjx.forward to update geom positions and sensors
+    before returning.  Inside a lax.scan this runs for every env at every
+    step — even when no episode is done — because jnp.where always evaluates
+    both branches.  Skipping mjx.forward here is safe: the immediately
+    following mjx.step handles forward kinematics anyway.
+
+    Savings: ~10× cheaper per call vs the full reset.  Matters because the
+    auto-reset inside the rollout scan touches this path every single step.
+
+    Parameters
+    ----------
+    cfg    : MJXEnvConfig for this individual.
+    n_envs : parallel-environment batch size.
+
+    Returns
+    -------
+    fast_batch_reset(keys) : keys (n_envs, 2) → (batched EnvState, obs batch)
+    """
+    _require_mjx()
+
+    base_dx     = cfg.base_data
+    rest_angles = cfg.rest_angles
+    cl_init     = cfg.ctrl_low_init
+    ch_init     = cfg.ctrl_high_init
+    spawn_h     = jnp.float32(cfg.spawn_height)
+    n_joints    = cfg.n_joints
+
+    def _fast_reset(rng_key: Any) -> Tuple[EnvState, Any]:
+        _, subkey = jax.random.split(rng_key)
+        jitter = jax.random.uniform(
+            subkey, (n_joints,), minval=-0.05, maxval=0.05, dtype=jnp.float32
+        )
+        init_joints = jnp.clip(rest_angles + jitter, cl_init, ch_init)
+        qpos = base_dx.qpos.at[2].set(spawn_h)
+        qpos = qpos.at[7 : 7 + n_joints].set(init_joints)
+        data = base_dx.replace(qpos=qpos)
+        # No mjx.forward — the next mjx.step runs full forward kinematics
+        state = EnvState(
+            data              = data,
+            step_idx          = jnp.int32(0),
+            sim_time          = jnp.float32(0.0),
+            prev_action       = jnp.zeros(n_joints, jnp.float32),
+            initial_torso_pos = data.qpos[0:3].astype(jnp.float32),
+            fell              = jnp.bool_(False),
+        )
+        obs = _build_obs(state, n_joints)
+        return state, obs
+
+    return jax.jit(jax.vmap(_fast_reset, in_axes=0))
+
+
+# ---------------------------------------------------------------------------
+# Reward-agnostic batch functions (rw_vec as runtime arg — no recompile per individual)
+# ---------------------------------------------------------------------------
+
+def make_reward_agnostic_batch_fns(
+    cfg:    MJXEnvConfig,
+    n_envs: int,
+) -> Tuple[Any, Any, Any]:
+    """
+    Return batch env functions where reward_weights_vec is a RUNTIME argument.
+
+    This is the critical optimisation for multi-individual evolution: because
+    reward weights are passed at call time (not baked into the JIT closure),
+    the compiled XLA kernel can be reused across ALL individuals.  Without
+    this, every individual triggers a fresh 30-60 s JIT recompilation.
+
+    Returns
+    -------
+    batch_reset(keys)                       → (batched_state, obs)
+        Full reset with mjx.forward.  keys shape (n_envs, 2).
+    batch_step_rw(states, actions, rw_vec)  → (states, obs, rewards, dones)
+        rw_vec : (reward_dim,) float32 — NOT vmapped (broadcast over envs).
+    fast_batch_reset(keys)                  → (batched_state, obs)
+        Fast reset without mjx.forward.
+    """
+    _require_mjx()
+
+    mx          = cfg.mjx_model
+    base_dx     = cfg.base_data
+    foot_gids   = cfg.foot_geom_ids
+    rest_angles = cfg.rest_angles
+    cl_init     = cfg.ctrl_low_init
+    ch_init     = cfg.ctrl_high_init
+    ctrl_low    = cfg.ctrl_low
+    ctrl_high   = cfg.ctrl_high
+    c2q         = cfg.ctrl_to_qpos
+
+    n_joints    = cfg.n_joints
+    n_feet      = cfg.n_feet
+    spawn_h     = jnp.float32(cfg.spawn_height)
+    n_substeps  = cfg.physics_steps_per_action
+    max_steps_  = cfg.max_steps
+    fall_h      = jnp.float32(cfg.fall_height)
+    dscale      = jnp.float32(cfg.delta_scale)
+    timestep_   = jnp.float32(cfg.timestep)
+
+    # ---- full reset (with mjx.forward) ------------------------------------
+    def _reset(rng_key: Any) -> Tuple[EnvState, Any]:
+        key, subkey = jax.random.split(rng_key)
+        jitter = jax.random.uniform(
+            subkey, (n_joints,), minval=-0.05, maxval=0.05, dtype=jnp.float32
+        )
+        init_joints = jnp.clip(rest_angles + jitter, cl_init, ch_init)
+        qpos = base_dx.qpos.at[2].set(spawn_h)
+        qpos = qpos.at[7 : 7 + n_joints].set(init_joints)
+        data = base_dx.replace(qpos=qpos)
+        data = mjx.forward(mx, data)
+        state = EnvState(
+            data              = data,
+            step_idx          = jnp.int32(0),
+            sim_time          = jnp.float32(0.0),
+            prev_action       = jnp.zeros(n_joints, jnp.float32),
+            initial_torso_pos = data.qpos[0:3].astype(jnp.float32),
+            fell              = jnp.bool_(False),
+        )
+        return state, _build_obs(state, n_joints)
+
+    # ---- fast reset (no mjx.forward) --------------------------------------
+    def _fast_reset(rng_key: Any) -> Tuple[EnvState, Any]:
+        _, subkey = jax.random.split(rng_key)
+        jitter = jax.random.uniform(
+            subkey, (n_joints,), minval=-0.05, maxval=0.05, dtype=jnp.float32
+        )
+        init_joints = jnp.clip(rest_angles + jitter, cl_init, ch_init)
+        qpos = base_dx.qpos.at[2].set(spawn_h)
+        qpos = qpos.at[7 : 7 + n_joints].set(init_joints)
+        data = base_dx.replace(qpos=qpos)
+        state = EnvState(
+            data              = data,
+            step_idx          = jnp.int32(0),
+            sim_time          = jnp.float32(0.0),
+            prev_action       = jnp.zeros(n_joints, jnp.float32),
+            initial_torso_pos = data.qpos[0:3].astype(jnp.float32),
+            fell              = jnp.bool_(False),
+        )
+        return state, _build_obs(state, n_joints)
+
+    # ---- step with rw_vec as explicit arg ---------------------------------
+    def _step_rw(
+        state:  EnvState,
+        action: Any,           # (n_joints,) float32
+        rw_vec: Any,           # (reward_dim,) float32 — broadcast, not vmapped
+    ) -> Tuple[EnvState, Any, Any, Any]:
+        action = jnp.clip(action.astype(jnp.float32), jnp.float32(-1.0), jnp.float32(1.0))
+        sensors_pre  = _read_sensors(state.data, n_joints, n_feet, foot_gids)
+        target_qpos  = sensors_pre.hip_angles + dscale * action
+        target_ctrl  = target_qpos[c2q]
+        target_ctrl  = jnp.clip(target_ctrl, ctrl_low, ctrl_high)
+        data         = state.data.replace(ctrl=target_ctrl)
+
+        def _substep(d, _):
+            return mjx.step(mx, d), None
+        data, _ = jax.lax.scan(_substep, data, None, length=n_substeps)
+
+        new_sim_time = state.sim_time + timestep_ * jnp.float32(n_substeps)
+        new_step_idx = state.step_idx + jnp.int32(1)
+        sensors      = _read_sensors(data, n_joints, n_feet, foot_gids)
+
+        fell_now        = sensors.torso_height < fall_h
+        fell_transition = fell_now & ~state.fell
+        fell            = state.fell | fell_now
+
+        reward = compute_step_reward_jax(
+            rw_vec, sensors, action, state.prev_action,
+            fell_transition, state.initial_torso_pos,
+        )
+        terminated = fell
+        truncated  = new_step_idx >= jnp.int32(max_steps_)
+        done       = terminated | truncated
+
+        new_state = EnvState(
+            data              = data,
+            step_idx          = new_step_idx,
+            sim_time          = new_sim_time,
+            prev_action       = action,
+            initial_torso_pos = state.initial_torso_pos,
+            fell              = fell,
+        )
+        return new_state, _build_obs(new_state, n_joints), reward, done
+
+    # vmap: states and actions over envs, rw_vec broadcast (in_axes=None)
+    batch_reset     = jax.jit(jax.vmap(_reset,     in_axes=0))
+    batch_step_rw   = jax.jit(jax.vmap(_step_rw,   in_axes=(0, 0, None)))
+    fast_batch_reset = jax.jit(jax.vmap(_fast_reset, in_axes=0))
+
+    return batch_reset, batch_step_rw, fast_batch_reset
+
+
+# ---------------------------------------------------------------------------
 # Debug / smoke test
 # ---------------------------------------------------------------------------
 

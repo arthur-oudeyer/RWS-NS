@@ -58,6 +58,8 @@ from mujoco_env_mjx import (
     EnvState,
     build_env_config,
     make_env_fns,
+    make_fast_reset_fn,
+    make_reward_agnostic_batch_fns,
     _pick_mjx_device,
 )
 from reward import RewardWeights
@@ -341,6 +343,180 @@ def make_ppo_update_fn(
 
 
 # ---------------------------------------------------------------------------
+# Optimised training step (single XLA kernel per PPO update)
+# ---------------------------------------------------------------------------
+
+def make_train_step_fn(
+    cfg:              MJXEnvConfig,
+    net:              ActorCritic,
+    n_envs:           int,
+    rollout_len:      int,
+    ppo_cfg:          PPOConfig,
+    gamma:            float,
+    gae_lambda:       float,
+    batch_step_rw:    Any,   # (states, actions, rw_vec) → (states, obs, rewards, dones)
+    fast_batch_reset: Any,   # (keys) → (states, obs)
+) -> Any:
+    """
+    Return a single @jax.jit function that performs one full PPO update:
+        rollout → GAE → n_epochs × n_minibatches of gradient steps.
+
+    Everything compiles into one XLA kernel.  No Python between minibatches.
+
+    Signature of the returned function
+    -----------------------------------
+        train_step(train_state, runner_state, rw_vec)
+            → (train_state, runner_state, metrics, rewards)
+
+        runner_state = (env_states, obs, rng)
+        rw_vec       = (reward_dim,) float32 — runtime, NOT baked into kernel
+        metrics      = {'loss', 'actor_loss', 'value_loss', 'entropy'}  (means)
+        rewards      = (rollout_len, n_envs) float32
+
+    rw_vec as runtime argument
+    --------------------------
+    By accepting rw_vec at call time rather than closing over it, the JIT-compiled
+    kernel can be REUSED across all individuals in an evolutionary run.
+    A single 30-60 s compile serves the entire experiment instead of one per individual.
+    """
+    total_samples = n_envs * rollout_len
+
+    # Effective minibatch size: total_samples must divide evenly.
+    _mb           = min(ppo_cfg.minibatch_size, total_samples)
+    _nmb          = max(1, total_samples // _mb)
+    effective_mb  = total_samples // _nmb
+    n_minibatches = _nmb
+
+    @jax.jit
+    def train_step(train_state: Any, runner_state: Any, rw_vec: Any) -> Any:
+        env_states, obs, rng = runner_state
+
+        # ------------------------------------------------------------------
+        # Phase 1 — Rollout (lax.scan over rollout_len steps)
+        #   obs carried through scan — no duplicate computation per step.
+        #   fast_batch_reset skips mjx.forward (~10× cheaper).
+        # ------------------------------------------------------------------
+        def env_step(carry, _):
+            states, obs, rng = carry
+            rng, key_act, key_rst = jax.random.split(rng, 3)
+
+            mean, log_std, value = jax.vmap(
+                partial(net.apply, train_state.params)
+            )(obs)
+
+            act_keys = jax.random.split(key_act, n_envs)
+            actions, log_probs = jax.vmap(_gaussian_sample)(act_keys, mean, log_std)
+            actions = jnp.clip(actions, jnp.float32(-1.0), jnp.float32(1.0))
+
+            # rw_vec is broadcast over envs (in_axes=None in vmap)
+            new_states, new_obs, rewards, dones = batch_step_rw(states, actions, rw_vec)
+
+            rst_keys             = jax.random.split(key_rst, n_envs)
+            rst_states, rst_obs  = fast_batch_reset(rst_keys)
+
+            final_states = jax.tree.map(
+                lambda n, r: jnp.where(
+                    dones.reshape((-1,) + (1,) * (n.ndim - 1)), r, n
+                ),
+                new_states, rst_states,
+            )
+            final_obs = jnp.where(dones[:, None], rst_obs, new_obs)
+
+            trans = Transition(obs, actions, log_probs, value, rewards, dones)
+            return (final_states, final_obs, rng), trans
+
+        (env_states, obs, rng), transitions = jax.lax.scan(
+            env_step, (env_states, obs, rng), None, length=rollout_len
+        )
+
+        # ------------------------------------------------------------------
+        # Phase 2 — Bootstrap value
+        # ------------------------------------------------------------------
+        _, _, last_value = jax.vmap(
+            partial(net.apply, train_state.params)
+        )(obs)
+
+        # ------------------------------------------------------------------
+        # Phase 3 — GAE
+        # ------------------------------------------------------------------
+        advantages, returns = compute_gae(
+            transitions.reward, transitions.value, transitions.done,
+            last_value, gamma, gae_lambda,
+        )
+
+        # ------------------------------------------------------------------
+        # Phase 4 — Flatten (T, N, ...) → (T*N, ...)
+        # ------------------------------------------------------------------
+        flat  = lambda x: x.reshape((total_samples,) + x.shape[2:])
+        obs_f = flat(transitions.obs)
+        act_f = flat(transitions.action)
+        lp_f  = flat(transitions.log_prob)
+        adv_f = flat(advantages)
+        ret_f = flat(returns)
+
+        # ------------------------------------------------------------------
+        # Phase 5 — PPO: lax.scan over epochs × minibatches
+        # ------------------------------------------------------------------
+        def _ppo_loss(params, mb_obs, mb_act, mb_lp, mb_adv, mb_ret):
+            mean, log_std, value = jax.vmap(partial(net.apply, params))(mb_obs)
+            std      = jnp.exp(log_std)
+            log_prob = -0.5 * (
+                jnp.sum(((mb_act - mean) / std) ** 2, axis=-1)
+                + jnp.sum(jnp.log(2.0 * jnp.pi * std ** 2), axis=-1)
+            )
+            ratio    = jnp.exp(log_prob - mb_lp)
+            adv_norm = (mb_adv - mb_adv.mean()) / (mb_adv.std() + 1e-8)
+            pg1      = -adv_norm * ratio
+            pg2      = -adv_norm * jnp.clip(ratio, 1 - ppo_cfg.clip_eps,
+                                                    1 + ppo_cfg.clip_eps)
+            al  = jnp.mean(jnp.maximum(pg1, pg2))
+            vl  = jnp.mean((value - mb_ret) ** 2)
+            ent = jnp.mean(
+                0.5 * jnp.sum(jnp.log(2.0 * jnp.pi * jnp.e * std ** 2), axis=-1)
+            )
+            return al + ppo_cfg.vf_coef * vl - ppo_cfg.ent_coef * ent, (al, vl, ent)
+
+        def _mb_update(ts, mb):
+            mb_obs, mb_act, mb_lp, mb_adv, mb_ret = mb
+            (loss, (al, vl, ent)), grads = jax.value_and_grad(
+                _ppo_loss, has_aux=True
+            )(ts.params, mb_obs, mb_act, mb_lp, mb_adv, mb_ret)
+            grads = jax.tree.map(
+                lambda g: jnp.clip(g, -ppo_cfg.max_grad_norm, ppo_cfg.max_grad_norm),
+                grads,
+            )
+            return ts.apply_gradients(grads=grads), (loss, al, vl, ent)
+
+        def _epoch(ts, epoch_key):
+            perm = jax.random.permutation(epoch_key, total_samples)
+            perm = perm[: n_minibatches * effective_mb]
+            mk   = lambda x: x[perm].reshape(
+                (n_minibatches, effective_mb) + x.shape[1:]
+            )
+            mbs = (mk(obs_f), mk(act_f), mk(lp_f), mk(adv_f), mk(ret_f))
+            ts, ep_metrics = jax.lax.scan(_mb_update, ts, mbs)
+            return ts, ep_metrics
+
+        # Safe key splitting inside JIT: use index slicing, not Python unpacking.
+        _all_keys  = jax.random.split(rng, ppo_cfg.n_epochs + 1)
+        rng        = _all_keys[0]
+        epoch_keys = _all_keys[1:]          # (n_epochs, 2)
+        train_state, all_ep_metrics = jax.lax.scan(_epoch, train_state, epoch_keys)
+
+        loss_all, al_all, vl_all, ent_all = all_ep_metrics
+        metrics = {
+            "loss":       jnp.mean(loss_all),
+            "actor_loss": jnp.mean(al_all),
+            "value_loss": jnp.mean(vl_all),
+            "entropy":    jnp.mean(ent_all),
+        }
+
+        return train_state, (env_states, obs, rng), metrics, transitions.reward
+
+    return train_step
+
+
+# ---------------------------------------------------------------------------
 # Full training loop
 # ---------------------------------------------------------------------------
 
@@ -361,6 +537,9 @@ def _run_training(
 ) -> Tuple[Any, float]:
     """
     Shared training loop.  Returns (final_params, end_fitness).
+
+    Uses make_train_step_fn so that each PPO update (rollout + GAE + all
+    minibatch gradient steps) compiles into a single XLA kernel.
     """
     net = ActorCritic(
         obs_dim=cfg.obs_dim,
@@ -372,90 +551,60 @@ def _run_training(
         optax.clip_by_global_norm(ppo_cfg.max_grad_norm),
         optax.adam(learning_rate),
     )
-    train_state = TrainState.create(
-        apply_fn=net.apply, params=params, tx=tx
+    train_state = TrainState.create(apply_fn=net.apply, params=params, tx=tx)
+
+    # Build env functions — reward-agnostic so the same compiled kernel works
+    # for all individuals (no recompile when rw_vec changes between individuals).
+    batch_reset, batch_step_rw, fast_reset = make_reward_agnostic_batch_fns(cfg, n_envs)
+
+    train_step = make_train_step_fn(
+        cfg, net, n_envs, rollout_len, ppo_cfg, gamma, gae_lambda,
+        batch_step_rw, fast_reset,
     )
 
-    collect_fn = make_rollout_fn(cfg, net, n_envs, rollout_len)
-    update_fn  = make_ppo_update_fn(net, tx, ppo_cfg)
-
+    # Initial reset (full reset with mjx.forward for valid kinematics at step 0)
     rng = jax.random.PRNGKey(seed)
-
-    # Initial batch reset
-    _, _, make_batch_fns = make_env_fns(cfg)
-    batch_reset, _ = make_batch_fns(n_envs)
     rng, key_rst = jax.random.split(rng)
-    reset_keys = jax.random.split(key_rst, n_envs)
-    states, _ = batch_reset(reset_keys)
+    rst_keys = jax.random.split(key_rst, n_envs)
+    env_states, obs = batch_reset(rst_keys)
 
-    n_updates = max(1, total_steps // (n_envs * rollout_len))
+    runner_state    = (env_states, obs, rng)
+    n_updates       = max(1, total_steps // (n_envs * rollout_len))
     total_collected = 0
-    episode_returns: list[float] = []
+    rw_vec          = cfg.reward_weights_vec   # (reward_dim,) JAX array
+
+    # Keep last few rollout reward arrays for fitness (lazy — no sync per step).
+    tail_rewards: list = []
+    keep_tail = max(2, 1 + fitness_episodes // max(1, n_envs))
 
     t0 = time.time()
     for update_idx in range(n_updates):
-        rng, key_col = jax.random.split(rng)
-        states, transitions, rng = collect_fn(train_state.params, states, key_col)
-        total_collected += n_envs * rollout_len
-
-        # Compute bootstrap value for last state
-        obs_last = jax.vmap(
-            lambda s: jnp.concatenate([
-                jnp.array([
-                    jnp.sin(s.sim_time * jnp.float32(1.0  / np.pi)),
-                    jnp.sin(s.sim_time * jnp.float32(5.0  / np.pi)),
-                    jnp.sin(s.sim_time * jnp.float32(15.0 / np.pi)),
-                ]),
-                s.data.qpos[7 : 7 + cfg.n_joints].astype(jnp.float32),
-                s.data.qvel[6 : 6 + cfg.n_joints].astype(jnp.float32),
-                s.data.qpos[3:7].astype(jnp.float32),
-                s.data.qvel[0:3].astype(jnp.float32),
-                s.data.qvel[3:6].astype(jnp.float32),
-            ])
-        )(states)
-        _, _, last_value = jax.vmap(partial(net.apply, train_state.params))(obs_last)
-
-        advantages, returns = compute_gae(
-            transitions.reward, transitions.value, transitions.done,
-            last_value, gamma, gae_lambda,
+        train_state, runner_state, metrics, raw_rewards = train_step(
+            train_state, runner_state, rw_vec
         )
+        total_collected += n_envs * rollout_len
+        tail_rewards.append(raw_rewards)
+        if len(tail_rewards) > keep_tail:
+            tail_rewards.pop(0)
 
-        # Flatten (T, n_envs, ...) → (T*n_envs, ...)
-        T, N = transitions.obs.shape[:2]
-        flat = lambda x: x.reshape((T * N,) + x.shape[2:])
-        obs_f    = flat(transitions.obs)
-        act_f    = flat(transitions.action)
-        lp_f     = flat(transitions.log_prob)
-        adv_f    = flat(advantages)
-        ret_f    = flat(returns)
-
-        # Track episode returns (for fitness)
-        ep_r = np.array(transitions.reward).sum(axis=0)  # rough per-env sum
-        episode_returns.extend(ep_r.tolist())
-
-        # PPO epochs (Python loop — small, acceptable)
-        total_samples = T * N
-        indices = np.arange(total_samples)
-        for _ in range(ppo_cfg.n_epochs):
-            np.random.shuffle(indices)
-            mb = ppo_cfg.minibatch_size
-            for start in range(0, total_samples, mb):
-                idx = indices[start : start + mb]
-                if len(idx) < 2:
-                    continue
-                train_state, metrics = update_fn(
-                    train_state,
-                    obs_f[idx], act_f[idx], lp_f[idx], adv_f[idx], ret_f[idx],
-                )
-
-        if verbose and (update_idx % max(1, n_updates // 10) == 0):
+        if verbose and (
+            update_idx % max(1, n_updates // 10) == 0
+            or update_idx == n_updates - 1
+        ):
+            jax.block_until_ready(metrics["loss"])   # sync only for logging
             elapsed = time.time() - t0
             fps = total_collected / elapsed
             print(f"  update {update_idx+1}/{n_updates}  "
                   f"steps={total_collected:,}  fps={fps:.0f}  "
                   f"loss={float(metrics['loss']):.4f}")
 
-    end_fitness = float(np.mean(episode_returns[-fitness_episodes:])) if episode_returns else 0.0
+    # Fitness: mean step reward over the last few rollouts (proxy for episodic return).
+    if tail_rewards:
+        last = jnp.concatenate([r.ravel() for r in tail_rewards])
+        end_fitness = float(jnp.mean(last))
+    else:
+        end_fitness = 0.0
+
     return train_state.params, end_fitness
 
 

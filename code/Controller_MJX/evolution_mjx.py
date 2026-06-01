@@ -50,13 +50,19 @@ from reward       import RewardWeights, mutate_weights, random_initial_weights
 from data_handler import ControllerResult, evaluate_batch, _IndividualSpec
 from archive      import MuLambdaArchive, MapEliteArchive
 from controller_morph import build_model
+import optax
+from flax.training.train_state import TrainState
+
 from mujoco_env_mjx   import (
     MJXEnvConfig, build_env_config, _pick_mjx_device,
+    make_reward_agnostic_batch_fns,
 )
 from ppo_trainer_mjx  import (
+    ActorCritic,
     train_from_scratch_mjx,
     train_warm_start_mjx,
     PPOConfig,
+    make_train_step_fn,
 )
 from video_renderer_mjx import rollout_to_video_mjx
 
@@ -142,7 +148,112 @@ class BaseEvolutionMJX(ABC):
         )
         # Keep the CPU-side mj_model for rendering (mjx.get_data needs it)
         self._mj_model, _ = build_model()
+
+        # Build shared JIT-compiled training infrastructure ONCE.
+        # Because rw_vec is a runtime argument (not baked into the kernel),
+        # the same compiled function handles all individuals without recompilation.
+        self._init_shared_training()
         print("[evolution_mjx] Template config ready.", flush=True)
+
+    def _init_shared_training(self) -> None:
+        """
+        Build JIT-compiled training infrastructure shared across all individuals.
+
+        Key insight: make_reward_agnostic_batch_fns creates a batch_step_rw function
+        where rw_vec is a RUNTIME argument (not a JIT closure constant).  Combined
+        with a single make_train_step_fn call, this means:
+          - JIT compiles ONCE (~30-60 s) during __init__
+          - Every subsequent individual reuses the same XLA kernel
+          - Different reward weights → different rw_vec arg, no recompile
+
+        Without this, each individual causes a fresh 30-60 s JIT recompilation
+        because the old design baked rw_vec into the closure.  For 50 individuals
+        that wasted >40 minutes per generation.
+        """
+        n_envs      = self.cfg.n_envs_mjx
+        rollout_len = self.cfg.n_steps_per_env
+        arch        = tuple(self.cfg.policy_arch)
+        ppo_cfg     = PPOConfig(n_epochs=4, minibatch_size=self.cfg.batch_size)
+
+        # Env functions: batch_reset with mjx.forward (used for initial reset),
+        # batch_step_rw (rw_vec at runtime), fast_batch_reset (no mjx.forward).
+        self._shared_batch_reset, self._shared_batch_step_rw, self._shared_fast_reset = \
+            make_reward_agnostic_batch_fns(self._template_cfg, n_envs)
+
+        # Single ActorCritic module — architecture fixed for the entire run.
+        self._shared_net = ActorCritic(
+            obs_dim = self._template_cfg.obs_dim,
+            act_dim = self._template_cfg.n_joints,
+            hidden  = arch,
+        )
+
+        # ONE compiled training step function for all individuals.
+        self._shared_train_step = make_train_step_fn(
+            cfg              = self._template_cfg,
+            net              = self._shared_net,
+            n_envs           = n_envs,
+            rollout_len      = rollout_len,
+            ppo_cfg          = ppo_cfg,
+            gamma            = self.cfg.gamma,
+            gae_lambda       = self.cfg.gae_lambda,
+            batch_step_rw    = self._shared_batch_step_rw,
+            fast_batch_reset = self._shared_fast_reset,
+        )
+
+    def _run_individual(
+        self,
+        params:           Any,
+        rw_vec:           Any,    # (reward_dim,) JAX float32
+        total_steps:      int,
+        seed:             int,
+        learning_rate:    float = 3e-4,
+        fitness_episodes: int   = 20,
+        verbose:          bool  = False,
+    ) -> tuple[Any, float]:
+        """
+        Train one individual using the shared compiled training step.
+        No recompilation — the kernel was compiled once in _init_shared_training.
+        """
+        n_envs      = self.cfg.n_envs_mjx
+        rollout_len = self.cfg.n_steps_per_env
+        ppo_cfg     = PPOConfig(n_epochs=4, minibatch_size=self.cfg.batch_size)
+
+        tx = optax.chain(
+            optax.clip_by_global_norm(ppo_cfg.max_grad_norm),
+            optax.adam(learning_rate),
+        )
+        train_state = TrainState.create(
+            apply_fn = self._shared_net.apply,
+            params   = params,
+            tx       = tx,
+        )
+
+        # Initial reset (full, with mjx.forward — needed for valid kinematics)
+        rng = jax.random.PRNGKey(seed)
+        rng, key_rst = jax.random.split(rng)
+        rst_keys = jax.random.split(key_rst, n_envs)
+        env_states, obs = self._shared_batch_reset(rst_keys)
+
+        runner_state    = (env_states, obs, rng)
+        n_updates       = max(1, total_steps // (n_envs * rollout_len))
+        tail_rewards    = []
+        keep_tail       = max(2, 1 + fitness_episodes // max(1, n_envs))
+
+        for update_idx in range(n_updates):
+            train_state, runner_state, metrics, raw_rewards = self._shared_train_step(
+                train_state, runner_state, rw_vec
+            )
+            tail_rewards.append(raw_rewards)
+            if len(tail_rewards) > keep_tail:
+                tail_rewards.pop(0)
+
+        if tail_rewards:
+            last = jnp.concatenate([r.ravel() for r in tail_rewards])
+            fitness = float(jnp.mean(last))
+        else:
+            fitness = 0.0
+
+        return train_state.params, fitness
 
     def _env_cfg_for(self, rw: RewardWeights) -> MJXEnvConfig:
         """Return a config with the given reward weights, reusing the compiled model."""
@@ -167,19 +278,20 @@ class BaseEvolutionMJX(ABC):
         seed:         int,
         individual_id: int,
     ) -> tuple[str, Any, float]:
-        env_cfg    = self._env_cfg_for(rw)
-        params, fitness = train_from_scratch_mjx(
-            cfg             = env_cfg,
-            seed            = seed,
-            total_steps     = self.cfg.n_init_steps,
-            n_envs          = self.cfg.n_envs_mjx,
-            rollout_len     = self.cfg.n_steps_per_env,
-            learning_rate   = self.cfg.learning_rate,
-            gamma           = self.cfg.gamma,
-            gae_lambda      = self.cfg.gae_lambda,
-            policy_arch     = tuple(self.cfg.policy_arch),
-            ppo_cfg         = self._ppo_cfg(),
-            fitness_episodes = 20,
+        """Train from random params using the shared compiled training step."""
+        from ppo_trainer_mjx import init_actor_critic
+        key    = jax.random.PRNGKey(seed)
+        _, init_params = init_actor_critic(
+            key, self._template_cfg.obs_dim, self._template_cfg.n_joints,
+            tuple(self.cfg.policy_arch),
+        )
+        rw_vec = rw.to_jax_vector()
+        params, fitness = self._run_individual(
+            params        = init_params,
+            rw_vec        = rw_vec,
+            total_steps   = self.cfg.n_init_steps,
+            seed          = seed,
+            learning_rate = self.cfg.learning_rate,
         )
         path = _policy_path(self.run_dir, individual_id)
         save_params(params, path)
@@ -192,20 +304,14 @@ class BaseEvolutionMJX(ABC):
         seed:          int,
         individual_id: int,
     ) -> tuple[str, Any, float]:
-        env_cfg    = self._env_cfg_for(rw)
-        params, fitness = train_warm_start_mjx(
-            parent_params   = parent_params,
-            cfg             = env_cfg,
-            seed            = seed,
-            total_steps     = self.cfg.n_warm_steps,
-            n_envs          = self.cfg.n_envs_mjx,
-            rollout_len     = self.cfg.n_steps_per_env,
-            learning_rate   = self.cfg.learning_rate,
-            gamma           = self.cfg.gamma,
-            gae_lambda      = self.cfg.gae_lambda,
-            policy_arch     = tuple(self.cfg.policy_arch),
-            ppo_cfg         = self._ppo_cfg(),
-            fitness_episodes = 20,
+        """Warm-start from parent params using the shared compiled training step."""
+        rw_vec = rw.to_jax_vector()
+        params, fitness = self._run_individual(
+            params        = parent_params,
+            rw_vec        = rw_vec,
+            total_steps   = self.cfg.n_warm_steps,
+            seed          = seed,
+            learning_rate = self.cfg.learning_rate,
         )
         path = _policy_path(self.run_dir, individual_id)
         save_params(params, path)
