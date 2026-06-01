@@ -283,15 +283,35 @@ def build_env_config(
     ctrl_high_np = mj_model.actuator_ctrlrange[:, 1].astype(np.float32)
 
     # ---- Create MJX model and zero-state base_data -------------------------
+    # ---- Limit collision pairs before MJX conversion -------------------------
+    # Default: all 25 geoms have contype=1/conaffinity=1 → 238 potential pairs.
+    # MJX pre-allocates a contact buffer for ALL potential pairs (static shapes)
+    # and processes them EVERY physics step, even when empty.  For locomotion
+    # training, only foot↔floor contacts are needed:
+    #   - Fall detection: torso height check (no contact needed)
+    #   - Reward: foot-contact count (foot↔floor only)
+    # Disabling all non-foot geom collisions reduces potential pairs from 238 to
+    # ~11 (one per foot), giving ~5-20× speedup in the contact-resolution step.
+    for _gi in range(mj_model.ngeom):
+        _name = mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_GEOM, _gi)
+        if _name in ("floor",):
+            pass   # keep floor as-is (contype=1, conaffinity=1)
+        elif _name and _name.startswith("foot") and _name.endswith("_geom"):
+            # Feet: only collide with floor (floor always detects them via its ca=1)
+            mj_model.geom_contype[_gi]     = 1
+            mj_model.geom_conaffinity[_gi] = 0
+        else:
+            # All other geoms (torso, legs, body parts, origin_tile): no collisions
+            mj_model.geom_contype[_gi]     = 0
+            mj_model.geom_conaffinity[_gi] = 0
+
     mx = mjx.put_model(mj_model, device=_mjx_dev)
 
     mj_data = mujoco.MjData(mj_model)
     mujoco.mj_resetData(mj_model, mj_data)
     base_dx = mjx.put_data(mj_model, mj_data, device=_mjx_dev)
 
-    # In MuJoCo 3.x, mj_model.nconmax = -1 (dynamic allocation).
-    # MJX pre-allocates a fixed contact buffer; read its size from the data array.
-    # Use _impl to access the non-deprecated internal representation.
+    # Read the actual allocated size (should now be ~11 instead of 238).
     nconmax = int(base_dx._impl.contact.geom1.shape[0])
 
     # ---- Convert everything to JAX arrays ----------------------------------

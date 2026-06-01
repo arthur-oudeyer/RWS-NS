@@ -805,6 +805,12 @@ class MorphologyManager:
 
         # Physics + visuals
         ET.SubElement(root, "option", timestep="0.005", gravity="0 0 -9.81")
+        # nconmax=48: cap MJX's pre-allocated contact buffer.
+        # Auto (nconmax=-1) gives 238 slots for this humanoid; only ~5-10 are
+        # ever active during locomotion. MJX processes ALL slots every physics
+        # step, so 238 vs 48 is ~5× unnecessary GPU work for contact resolution
+        # — the dominant cost in MJX physics on GPU.
+        ET.SubElement(root, "size", nconmax="48")
         visual = ET.SubElement(root, "visual")
         ET.SubElement(visual, "headlight",
             diffuse="0.7 0.7 0.7", ambient="0.3 0.3 0.3", specular="0 0 0")
