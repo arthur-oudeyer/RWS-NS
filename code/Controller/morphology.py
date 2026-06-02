@@ -804,7 +804,7 @@ class MorphologyManager:
         root = ET.Element("mujoco", model=morph.name)
 
         # Physics + visuals
-        ET.SubElement(root, "option", timestep="0.005", gravity="0 0 -9.81")
+        ET.SubElement(root, "option", timestep="0.01", gravity="0 0 -9.81")
         visual = ET.SubElement(root, "visual")
         ET.SubElement(visual, "headlight",
             diffuse="0.7 0.7 0.7", ambient="0.3 0.3 0.3", specular="0 0 0")

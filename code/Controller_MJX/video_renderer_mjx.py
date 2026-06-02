@@ -177,7 +177,10 @@ def _render_frame(
     renderer2.update_scene(mj_data, camera=cam2)
     frame2 = renderer2.render()
 
-    return np.concatenate([frame1, frame2], axis=1)
+    # EGL renders in linear color space — apply gamma to match display appearance.
+    combined = np.concatenate([frame1, frame2], axis=1).astype(np.float32) / 255.0
+    combined = np.clip(combined ** (1.0 / 2.2), 0.0, 1.0)
+    return (combined * 255).astype(np.uint8)
 
 
 # ---------------------------------------------------------------------------

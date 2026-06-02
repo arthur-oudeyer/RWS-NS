@@ -84,30 +84,30 @@ class ExperimentConfig:
     # ---- Reward weights (defaults; mutation σ controls per-gen jitter) -------
     # Default vector — opinionated starting prior. See instruction.md §5.
     # Original 7 terms
-    rw_forward_velocity: float = 1.0
-    rw_lateral_drift:    float = 0.1
-    rw_upright_bonus:    float = 0.5
-    rw_energy_penalty:   float = 0.001
-    rw_contact_reward:   float = 0.1
-    rw_alive_bonus:      float = 0.05
-    rw_fall_penalty:     float = 10.0
+    rw_forward_velocity: float = 0.
+    rw_lateral_drift:    float = 0.
+    rw_upright_bonus:    float = 0.
+    rw_energy_penalty:   float = 0.
+    rw_contact_reward:   float = 0.
+    rw_alive_bonus:      float = 0.
+    rw_fall_penalty:     float = 50.0
     # Extended 10 terms (small positive so log-normal mutation can activate them)
-    rw_no_contact_reward:           float = 0.05
-    rw_torso_height_reward:         float = 0.05
-    rw_torso_rotation_reward:       float = 0.01
-    rw_torso_tilting_speed_reward:  float = 0.01
-    rw_limb_coordination_reward:    float = 0.05
-    rw_nervosity_reward:            float = 0.01
-    rw_smooth_reward:               float = 0.05
-    rw_vertical_velocity_reward:    float = 0.05
-    rw_lateral_velocity_reward:     float = 0.01
-    rw_joint_range_reward:          float = 0.01
-    rw_height_target_reward:        float = 0.3
-    rw_tilt_penalty:                float = 0.2
-    rw_tilt_rate_penalty:           float = 0.1
-    rw_all_feet_planted_bonus:      float = 0.2
-    rw_vertical_velocity_penalty:     float = 0.05
-    rw_horizontal_velocity_penalty:    float = 0.05
+    rw_no_contact_reward:           float = 0.
+    rw_torso_height_reward:         float = 0.
+    rw_torso_rotation_reward:       float = 0.
+    rw_torso_tilting_speed_reward:  float = 0.
+    rw_limb_coordination_reward:    float = 0.
+    rw_nervosity_reward:            float = 0.
+    rw_smooth_reward:               float = 0.
+    rw_vertical_velocity_reward:    float = 0.
+    rw_lateral_velocity_reward:     float = 0.
+    rw_joint_range_reward:          float = 0.
+    rw_height_target_reward:        float = 3.0
+    rw_tilt_penalty:                float = 0.
+    rw_tilt_rate_penalty:           float = 0.
+    rw_all_feet_planted_bonus:      float = 0.
+    rw_vertical_velocity_penalty:     float = 0.
+    rw_horizontal_velocity_penalty:    float = 0.
 
     # Mutation σ for the per-generation log-normal noise on each weight.
     # σ_init is used to widen the *initial* population around the default
@@ -116,7 +116,7 @@ class ExperimentConfig:
     reward_init_sigma:         float = 0.8
 
     # ---- PPO inner loop -----------------------------------------------------
-    n_init_steps: int = 1_000_000      # from-scratch training budget (gen 0)
+    n_init_steps: int = 5_000_000      # from-scratch training budget (gen 0)
     n_warm_steps: int = 250_000       # warm-start budget for mutated children
     n_envs:       int = 8
     policy_arch:  list = field(default_factory=lambda: [256, 256])
@@ -125,7 +125,7 @@ class ExperimentConfig:
     gae_lambda:       float = 0.95
     ent_coef:         float = 0.0
     vf_coef:          float = 0.5
-    n_steps_per_env:  int   = 2048   # PPO rollout length before each update
+    n_steps_per_env:  int   = 64   # PPO rollout length before each update
     batch_size:       int   = 256
 
     # ---- Env / episode ------------------------------------------------------
@@ -134,7 +134,7 @@ class ExperimentConfig:
     control_frequency: int   = 20    # Hz — how often the policy outputs an action
     # MuJoCo timestep is set by the morphology XML (0.005 s); the env applies
     # the same action for `physics_steps_per_action` mj_steps.
-    fall_height:       float = 0.3  # torso z below this terminates the episode
+    fall_height:       float = 0.25  # torso z below this terminates the episode
 
     # ---- Video / VLM render -------------------------------------------------
     video_fps:           int  = 20
