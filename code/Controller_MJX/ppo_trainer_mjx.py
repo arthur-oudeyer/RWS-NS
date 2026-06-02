@@ -275,10 +275,10 @@ def compute_gae(
 class PPOConfig:
     clip_eps:      float = 0.2
     vf_coef:       float = 0.5
-    ent_coef:      float = 0.01
+    ent_coef:      float = 0.0
     max_grad_norm: float = 0.5
     n_epochs:      int   = 4
-    n_minibatches: int   = 4    # minibatches per epoch; total grad steps = n_epochs × n_minibatches
+    n_minibatches: int   = 32   # minibatches per epoch; total grad steps = n_epochs × n_minibatches
 
 
 def make_ppo_update_fn(
@@ -381,7 +381,8 @@ def make_train_step_fn(
     """
     total_samples = n_envs * rollout_len
 
-    n_minibatches = max(1, ppo_cfg.n_minibatches)
+    # Clamp so each minibatch has at least one sample (matters for tiny test configs).
+    n_minibatches = max(1, min(ppo_cfg.n_minibatches, total_samples))
     effective_mb  = total_samples // n_minibatches
 
     @jax.jit

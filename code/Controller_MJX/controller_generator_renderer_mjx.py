@@ -278,7 +278,7 @@ def _env_cfg_for(rw: RewardWeights, params: TrainParams):
 
 
 def _ppo_cfg(params: TrainParams) -> PPOConfig:
-    return PPOConfig(n_epochs=4, n_minibatches=4)
+    return PPOConfig(n_epochs=4, n_minibatches=32)
 
 
 # ---------------------------------------------------------------------------

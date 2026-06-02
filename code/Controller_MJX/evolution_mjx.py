@@ -173,7 +173,7 @@ class BaseEvolutionMJX(ABC):
         n_envs      = self.cfg.n_envs_mjx
         rollout_len = self.cfg.n_steps_per_env
         arch        = tuple(self.cfg.policy_arch)
-        ppo_cfg     = PPOConfig(n_epochs=4, n_minibatches=4)
+        ppo_cfg     = PPOConfig(n_epochs=4, n_minibatches=32)
 
         # Env functions: batch_reset with mjx.forward (used for initial reset),
         # batch_step_rw (rw_vec at runtime), fast_batch_reset (no mjx.forward).
@@ -216,7 +216,7 @@ class BaseEvolutionMJX(ABC):
         """
         n_envs      = self.cfg.n_envs_mjx
         rollout_len = self.cfg.n_steps_per_env
-        ppo_cfg     = PPOConfig(n_epochs=4, n_minibatches=4)
+        ppo_cfg     = PPOConfig(n_epochs=4, n_minibatches=32)
 
         tx = optax.chain(
             optax.clip_by_global_norm(ppo_cfg.max_grad_norm),
@@ -263,7 +263,7 @@ class BaseEvolutionMJX(ABC):
         )
 
     def _ppo_cfg(self) -> PPOConfig:
-        return PPOConfig(n_epochs=4, n_minibatches=4)
+        return PPOConfig(n_epochs=4, n_minibatches=32)
 
     # ------------------------------------------------------------------
     # Per-child operations

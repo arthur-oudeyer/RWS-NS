@@ -180,7 +180,7 @@ def _print_device_info() -> None:
 
 
 def _ppo_cfg(n_envs: int, rollout_len: int) -> PPOConfig:
-    return PPOConfig(n_epochs=4, n_minibatches=4)
+    return PPOConfig(n_epochs=4, n_minibatches=32)
 
 
 def _build_env(rw: RewardWeights, episode: float, fall_height: float,
