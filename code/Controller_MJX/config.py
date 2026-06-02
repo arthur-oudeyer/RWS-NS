@@ -141,7 +141,7 @@ class ExperimentConfig:
     control_frequency: int   = 20    # Hz — how often the policy outputs an action
     # MuJoCo timestep is set by the morphology XML (0.019 s); the env applies
     # the same action for `physics_steps_per_action` mj_steps.
-    fall_height:       float = 0.25  # torso z below this terminates the episode
+    fall_height:       float = 0.  # torso z below this terminates the episode
 
     # ---- Video / VLM render -------------------------------------------------
     video_fps:           int  = 20
