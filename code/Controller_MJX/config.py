@@ -118,30 +118,30 @@ class ExperimentConfig:
     # ---- MJX / JAX backend ---------------------------------------------------
     # Number of parallel environments vectorised via jax.vmap.
     # On Mac M2 (Metal) start low (64–128); bump to 512–2048 on a CUDA GPU.
-    n_envs_mjx:   int = 128
+    n_envs_mjx:   int = 8096
     # JAX backend: "cpu" | "gpu" | "metal"  (set before importing jax)
     jax_backend:  str = "metal"
 
     # ---- PPO inner loop -----------------------------------------------------
-    n_init_steps: int = 1_000_000      # from-scratch training budget (gen 0)
-    n_warm_steps: int = 250_000       # warm-start budget for mutated children
-    n_envs:       int = 8
+    n_init_steps: int = 50_000_000      # from-scratch training budget (gen 0)
+    n_warm_steps: int = 10_000_000      # warm-start budget for mutated childrenOkay
+    n_envs:       int = 8096
     policy_arch:  list = field(default_factory=lambda: [256, 256])
-    learning_rate:    float = 3e-4
+    learning_rate:    float = 5e-4
     gamma:            float = 0.99
     gae_lambda:       float = 0.95
     ent_coef:         float = 0.0
     vf_coef:          float = 0.5
-    n_steps_per_env:  int   = 2048   # PPO rollout length before each update
+    n_steps_per_env:  int   = 64   # PPO rollout length before each update
     batch_size:       int   = 256
 
     # ---- Env / episode ------------------------------------------------------
     # Episode length used both for PPO rollouts and for the recorded MP4.
     episode_duration:  float = 5.0   # seconds of simulation per episode
     control_frequency: int   = 20    # Hz — how often the policy outputs an action
-    # MuJoCo timestep is set by the morphology XML (0.005 s); the env applies
+    # MuJoCo timestep is set by the morphology XML (0.019 s); the env applies
     # the same action for `physics_steps_per_action` mj_steps.
-    fall_height:       float = 0.28  # torso z below this terminates the episode
+    fall_height:       float = 0.25  # torso z below this terminates the episode
 
     # ---- Video / VLM render -------------------------------------------------
     video_fps:           int  = 20

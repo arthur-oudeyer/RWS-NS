@@ -804,7 +804,7 @@ class MorphologyManager:
         root = ET.Element("mujoco", model=morph.name)
 
         # Physics + visuals
-        ET.SubElement(root, "option", timestep="0.005", gravity="0 0 -9.81")
+        ET.SubElement(root, "option", timestep="0.01", gravity="0 0 -9.81")
         # nconmax=48: cap MJX's pre-allocated contact buffer.
         # Auto (nconmax=-1) gives 238 slots for this humanoid; only ~5-10 are
         # ever active during locomotion. MJX processes ALL slots every physics
