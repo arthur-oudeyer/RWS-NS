@@ -297,11 +297,15 @@ def build_env_config(
         if _name in ("floor",):
             pass   # keep floor as-is (contype=1, conaffinity=1)
         elif _name and _name.startswith("foot") and _name.endswith("_geom"):
-            # Feet: only collide with floor (floor always detects them via its ca=1)
+            # Feet: only collide with floor
+            mj_model.geom_contype[_gi]     = 1
+            mj_model.geom_conaffinity[_gi] = 0
+        elif _name and _name.endswith("torso_geom"):
+            # Torso: collide with floor only (prevents passing through ground)
             mj_model.geom_contype[_gi]     = 1
             mj_model.geom_conaffinity[_gi] = 0
         else:
-            # All other geoms (torso, legs, body parts, origin_tile): no collisions
+            # All other geoms (legs, body parts, origin_tile): no collisions
             mj_model.geom_contype[_gi]     = 0
             mj_model.geom_conaffinity[_gi] = 0
 
