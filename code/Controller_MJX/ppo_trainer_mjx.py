@@ -402,8 +402,8 @@ def make_train_step_fn(
             )(obs)
 
             act_keys = jax.random.split(key_act, n_envs)
-            actions, log_probs = jax.vmap(_gaussian_sample)(act_keys, mean, log_std)
-            actions = jnp.clip(actions, jnp.float32(-1.0), jnp.float32(1.0))
+            actions_raw, log_probs = jax.vmap(_gaussian_sample)(act_keys, mean, log_std)
+            actions = jnp.clip(actions_raw, jnp.float32(-1.0), jnp.float32(1.0))
 
             # rw_vec is broadcast over envs (in_axes=None in vmap)
             new_states, new_obs, rewards, dones = batch_step_rw(states, actions, rw_vec)
@@ -419,7 +419,11 @@ def make_train_step_fn(
             )
             final_obs = jnp.where(dones[:, None], rst_obs, new_obs)
 
-            trans = Transition(obs, actions, log_probs, value, rewards, dones)
+            # Store unclipped action so PPO log_prob recomputation is consistent
+            # with the sampled log_prob.  Clipped actions sent to env are correct
+            # for physics; storing them here would corrupt the ratio computation
+            # for ~26% of samples and systematically push mean toward zero.
+            trans = Transition(obs, actions_raw, log_probs, value, rewards, dones)
             return (final_states, final_obs, rng), trans
 
         (env_states, obs, rng), transitions = jax.lax.scan(
@@ -478,10 +482,6 @@ def make_train_step_fn(
             (loss, (al, vl, ent)), grads = jax.value_and_grad(
                 _ppo_loss, has_aux=True
             )(ts.params, mb_obs, mb_act, mb_lp, mb_adv, mb_ret)
-            grads = jax.tree.map(
-                lambda g: jnp.clip(g, -ppo_cfg.max_grad_norm, ppo_cfg.max_grad_norm),
-                grads,
-            )
             return ts.apply_gradients(grads=grads), (loss, al, vl, ent)
 
         def _epoch(ts, epoch_key):
