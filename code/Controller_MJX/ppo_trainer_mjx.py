@@ -588,12 +588,15 @@ def _run_training(
             update_idx % max(1, n_updates // 10) == 0
             or update_idx == n_updates - 1
         ):
-            jax.block_until_ready(metrics["loss"])   # sync only for logging
+            jax.block_until_ready(metrics["value_loss"])   # sync only for logging
             elapsed = time.time() - t0
             fps = total_collected / elapsed
-            print(f"  update {update_idx+1}/{n_updates}  "
-                  f"steps={total_collected:,}  fps={fps:.0f}  "
-                  f"loss={float(metrics['loss']):.4f}")
+            rw_mean = float(jnp.mean(jnp.concatenate([r.ravel() for r in tail_rewards]))) if tail_rewards else 0.0
+            print(f"  update {update_idx+1}/{n_updates}  steps={total_collected:,}  fps={fps:.0f}"
+                  f"  rw={rw_mean:+.3f}"
+                  f"  π={float(metrics['actor_loss']):+.3f}"
+                  f"  V={float(metrics['value_loss']):.1f}"
+                  f"  ent={float(metrics['entropy']):.3f}")
 
     # Fitness: mean step reward over the last few rollouts (proxy for episodic return).
     if tail_rewards:
