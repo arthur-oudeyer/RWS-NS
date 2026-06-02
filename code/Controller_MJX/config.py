@@ -127,7 +127,7 @@ class ExperimentConfig:
     n_warm_steps: int = 10_000_000      # warm-start budget for mutated childrenOkay
     n_envs:       int = 8096
     policy_arch:  list = field(default_factory=lambda: [256, 256])
-    learning_rate:    float = 5e-4
+    learning_rate:    float = 3e-4
     gamma:            float = 0.99
     gae_lambda:       float = 0.95
     ent_coef:         float = 0.0

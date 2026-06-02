@@ -78,7 +78,7 @@ class ExperimentConfig:
     init_population_size: int = 10   # 0 = strategy default
 
     # ---- Morphology / Env ----------------------------------------------------
-    morphology = "human" # Morphology, default None -> QUADRIPOD
+    morphology = "tripod" # Morphology, default None -> QUADRIPOD
     photorealistic = True
 
     # ---- Reward weights (defaults; mutation σ controls per-gen jitter) -------
@@ -125,7 +125,7 @@ class ExperimentConfig:
     gae_lambda:       float = 0.95
     ent_coef:         float = 0.0
     vf_coef:          float = 0.5
-    n_steps_per_env:  int   = 64   # PPO rollout length before each update
+    n_steps_per_env:  int   = 32   # PPO rollout length before each update
     batch_size:       int   = 256
 
     # ---- Env / episode ------------------------------------------------------
@@ -134,7 +134,7 @@ class ExperimentConfig:
     control_frequency: int   = 20    # Hz — how often the policy outputs an action
     # MuJoCo timestep is set by the morphology XML (0.005 s); the env applies
     # the same action for `physics_steps_per_action` mj_steps.
-    fall_height:       float = 0.25  # torso z below this terminates the episode
+    fall_height:       float = 0.0  # torso z below this terminates the episode
 
     # ---- Video / VLM render -------------------------------------------------
     video_fps:           int  = 20

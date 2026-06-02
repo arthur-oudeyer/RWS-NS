@@ -81,7 +81,7 @@ def net_and_params(cfg):
 
 @pytest.fixture(scope="module")
 def ppo_cfg():
-    return PPOConfig(n_epochs=1, minibatch_size=8)
+    return PPOConfig(n_epochs=1, n_minibatches=4)
 
 
 # ---------------------------------------------------------------------------
@@ -369,7 +369,7 @@ class TestTrainAPI:
             rollout_len  = _TINY_ROLL,
             policy_arch  = _TINY_ARCH,
             fitness_episodes = 1,
-            ppo_cfg      = PPOConfig(n_epochs=2, minibatch_size=8),
+            ppo_cfg      = PPOConfig(n_epochs=2, n_minibatches=4),
         )
         rw_child = mutate_weights(RewardWeights(), sigma=0.5, rng=np.random.default_rng(9))
         cfg_child = build_env_config(reward_weights=rw_child, episode_duration=2.0)
@@ -382,7 +382,7 @@ class TestTrainAPI:
             rollout_len   = _TINY_ROLL,
             policy_arch   = _TINY_ARCH,
             fitness_episodes = 1,
-            ppo_cfg       = PPOConfig(n_epochs=2, minibatch_size=8),
+            ppo_cfg       = PPOConfig(n_epochs=2, n_minibatches=4),
         )
         l1 = jax.tree.leaves(params)
         l2 = jax.tree.leaves(params2)

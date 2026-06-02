@@ -111,7 +111,7 @@ def run_benchmark(
         n_envs       = n_envs,
         rollout_len  = rollout_len,
         policy_arch  = policy_arch,
-        ppo_cfg      = PPOConfig(n_epochs=1, minibatch_size=max(4, n_envs * rollout_len // 4)),
+        ppo_cfg      = PPOConfig(n_epochs=1, n_minibatches=4),
         fitness_episodes = 1,
         verbose      = False,
     )
@@ -134,7 +134,7 @@ def run_benchmark(
         n_envs        = n_envs,
         rollout_len   = rollout_len,
         policy_arch   = policy_arch,
-        ppo_cfg       = PPOConfig(n_epochs=1, minibatch_size=max(4, n_envs * rollout_len // 4)),
+        ppo_cfg       = PPOConfig(n_epochs=1, n_minibatches=4),
         fitness_episodes = 1,
         verbose       = False,
     )

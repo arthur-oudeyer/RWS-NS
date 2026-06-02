@@ -278,7 +278,7 @@ class PPOConfig:
     ent_coef:      float = 0.01
     max_grad_norm: float = 0.5
     n_epochs:      int   = 4
-    minibatch_size: int  = 256
+    n_minibatches: int   = 4    # minibatches per epoch; total grad steps = n_epochs × n_minibatches
 
 
 def make_ppo_update_fn(
@@ -381,11 +381,8 @@ def make_train_step_fn(
     """
     total_samples = n_envs * rollout_len
 
-    # Effective minibatch size: total_samples must divide evenly.
-    _mb           = min(ppo_cfg.minibatch_size, total_samples)
-    _nmb          = max(1, total_samples // _mb)
-    effective_mb  = total_samples // _nmb
-    n_minibatches = _nmb
+    n_minibatches = max(1, ppo_cfg.n_minibatches)
+    effective_mb  = total_samples // n_minibatches
 
     @jax.jit
     def train_step(train_state: Any, runner_state: Any, rw_vec: Any) -> Any:

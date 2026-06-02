@@ -397,7 +397,7 @@ class TestRewardConsistency:
             cfg=env_cfg, seed=0, total_steps=_N_STEPS * 4,
             n_envs=_N_ENVS, rollout_len=_ROLL_LEN,
             policy_arch=_TINY_ARCH,
-            ppo_cfg=PPOConfig(n_epochs=2, minibatch_size=8),
+            ppo_cfg=PPOConfig(n_epochs=2, n_minibatches=4),
             fitness_episodes=1,
         )
         # Both should be finite — we don't assert direction since tiny training

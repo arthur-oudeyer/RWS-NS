@@ -278,8 +278,7 @@ def _env_cfg_for(rw: RewardWeights, params: TrainParams):
 
 
 def _ppo_cfg(params: TrainParams) -> PPOConfig:
-    mb = max(8, params.n_envs_mjx * params.rollout_len // 4)
-    return PPOConfig(n_epochs=4, minibatch_size=mb)
+    return PPOConfig(n_epochs=4, n_minibatches=4)
 
 
 # ---------------------------------------------------------------------------

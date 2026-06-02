@@ -535,7 +535,10 @@ def make_env_fns(
 
         sensors = _read_sensors(data, n_joints, n_feet, foot_gids)
 
-        fell_now        = sensors.torso_height < fall_h
+        # Check fall both before and after physics: torso collision can push
+        # the body back above fall_height in one step, so pre-physics position
+        # must also be checked to avoid "healing" a fallen state.
+        fell_now        = (sensors.torso_height < fall_h) | (sensors_pre.torso_height < fall_h)
         fell_transition = fell_now & ~state.fell     # fires exactly once
         fell            = state.fell | fell_now
 
