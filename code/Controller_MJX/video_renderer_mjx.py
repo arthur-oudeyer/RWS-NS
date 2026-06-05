@@ -237,7 +237,8 @@ def rollout_to_video_mjx(
     Returns
     -------
     (save_path, info)
-        info = {n_frames, terminated, truncated, total_reward, n_steps}
+        info = {n_frames, terminated, truncated, total_reward, n_steps,
+                spawn_height, max_torso_height, jump_height}
     """
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -291,6 +292,8 @@ def rollout_to_video_mjx(
     total_reward = 0.0
     terminated   = False
     truncated    = False
+    spawn_height = 0.0
+    max_torso_height = 0.0
 
     try:
         key = jax.random.PRNGKey(seed)
@@ -298,6 +301,8 @@ def rollout_to_video_mjx(
 
         # Render initial frame (spawn pose)
         mj_data = mjx_state_to_mj_data(mj_model, state)
+        spawn_height     = float(mj_data.qpos[2])   # free-joint torso z at reset
+        max_torso_height = spawn_height
         frame = _render_frame(renderer1, renderer2, mj_data, cam1, cam2,
                               camera_track_torso)
         frame_q.put(frame.copy())
@@ -309,6 +314,7 @@ def rollout_to_video_mjx(
             total_reward += float(reward)
 
             mj_data = mjx_state_to_mj_data(mj_model, state)
+            max_torso_height = max(max_torso_height, float(mj_data.qpos[2]))
             frame = _render_frame(renderer1, renderer2, mj_data, cam1, cam2,
                                   camera_track_torso)
             frame_q.put(frame.copy())
@@ -328,11 +334,14 @@ def rollout_to_video_mjx(
         renderer2.close()
 
     return save_path, {
-        "n_frames":     n_frames,
-        "terminated":   terminated,
-        "truncated":    truncated,
-        "total_reward": total_reward,
-        "n_steps":      int(state.step_idx),
+        "n_frames":         n_frames,
+        "terminated":       terminated,
+        "truncated":        truncated,
+        "total_reward":     total_reward,
+        "n_steps":          int(state.step_idx),
+        "spawn_height":     spawn_height,
+        "max_torso_height": max_torso_height,
+        "jump_height":      max(0.0, max_torso_height - spawn_height),
     }
 
 
