@@ -129,7 +129,7 @@ JUMP_REWARD_PRIOR = {
     "upright_bonus":            0.3,    # stay roughly upright
     "alive_bonus":              0.1,    # don't terminate early
     "energy_penalty":           0.001,  # mild effort cost
-    "fall_penalty":             50.0,    # discourage crashing through the floor
+    "fall_penalty":             5.0,    # discourage crashing through the floor
 }
 
 
