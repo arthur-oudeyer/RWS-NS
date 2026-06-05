@@ -133,6 +133,10 @@ class BaseEvolutionMJX(ABC):
         self.cfg     = cfg
         self.run_dir = Path(run_dir)
         self.rng     = rng if rng is not None else np.random.default_rng(cfg.seed)
+        # When True, _run_individual prints throttled per-update PPO progress
+        # (update, steps/s, reward, losses, entropy) — useful for spotting a
+        # divergent inner loop without waiting for the whole individual to finish.
+        self.verbose_training = False
 
         # Force CPU device for MJX (Metal not supported)
         _dev = _pick_mjx_device()
@@ -239,6 +243,10 @@ class BaseEvolutionMJX(ABC):
         tail_rewards    = []
         keep_tail       = max(2, 1 + fitness_episodes // max(1, n_envs))
 
+        show     = verbose or self.verbose_training
+        t_start  = time.perf_counter()
+        last_log = t_start
+
         for update_idx in range(n_updates):
             train_state, runner_state, metrics, raw_rewards = self._shared_train_step(
                 train_state, runner_state, rw_vec
@@ -246,6 +254,22 @@ class BaseEvolutionMJX(ABC):
             tail_rewards.append(raw_rewards)
             if len(tail_rewards) > keep_tail:
                 tail_rewards.pop(0)
+
+            # Throttled progress: at most every ~5 s plus the final update.
+            # The block_until_ready sync only fires when we actually print, so
+            # logging does not stall the pipelined GPU rollout/update loop.
+            now = time.perf_counter()
+            if show and (now - last_log >= 5.0 or update_idx == n_updates - 1):
+                jax.block_until_ready(metrics["value_loss"])
+                steps_done = (update_idx + 1) * n_envs * rollout_len
+                fps = steps_done / (now - t_start)
+                rw_mean = float(jnp.mean(raw_rewards))
+                print(f"        update {update_idx+1}/{n_updates}  "
+                      f"steps={steps_done:,}  fps={fps:,.0f}  "
+                      f"rw={rw_mean:+.3f}  π={float(metrics['actor_loss']):+.3f}  "
+                      f"V={float(metrics['value_loss']):.1f}  "
+                      f"ent={float(metrics['entropy']):.3f}", flush=True)
+                last_log = now
 
         if tail_rewards:
             last = jnp.concatenate([r.ravel() for r in tail_rewards])
