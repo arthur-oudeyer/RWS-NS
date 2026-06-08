@@ -149,6 +149,7 @@ class BaseEvolutionMJX(ABC):
             episode_duration  = cfg.episode_duration,
             control_frequency = cfg.control_frequency,
             fall_height       = cfg.fall_height,
+            prediction_factor = cfg.prediction_factor,
         )
         # Keep the CPU-side mj_model for rendering (mjx.get_data needs it)
         self._mj_model, _ = build_model()

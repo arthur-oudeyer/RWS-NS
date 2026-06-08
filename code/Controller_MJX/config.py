@@ -142,6 +142,10 @@ class ExperimentConfig:
     # MuJoCo timestep is set by the morphology XML (0.019 s); the env applies
     # the same action for `physics_steps_per_action` mj_steps.
     fall_height:       float = 0.  # torso z below this terminates the episode
+    # Action → joint-angle delta scale = prediction_factor / control_frequency.
+    # -60 mirrors the CPU mujoco_env.py (≈3 rad/tick at 20 Hz — very fast/nervous).
+    # Use a smaller magnitude (e.g. -15) for slower, smoother, more stable motion.
+    prediction_factor: float = -60.0
 
     # ---- Video / VLM render -------------------------------------------------
     video_fps:           int  = 20

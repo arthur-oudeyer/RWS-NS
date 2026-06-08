@@ -189,6 +189,7 @@ def build_env_config(
     episode_duration:  float = 5.0,
     control_frequency: int   = 20,
     fall_height:       float = 0.3,
+    prediction_factor: Optional[float] = None,
 ) -> MJXEnvConfig:
     """
     Build an MJXEnvConfig for the static morphology.
@@ -229,7 +230,11 @@ def build_env_config(
     physics_steps_per_action = max(
         1, int(round(1.0 / (control_frequency * timestep)))
     )
-    delta_scale = _PREDICTION_FACTOR / float(control_frequency)
+    # Action → joint-angle delta per control tick. Larger |factor| = bigger,
+    # faster joint moves (and more physics instability). Default mirrors
+    # mujoco_env.py (-60); pass a smaller magnitude to slow the robot down.
+    pf = _PREDICTION_FACTOR if prediction_factor is None else float(prediction_factor)
+    delta_scale = pf / float(control_frequency)
     max_steps   = int(episode_duration * control_frequency)
 
     # ---- Discover foot geom IDs at compile time ----------------------------

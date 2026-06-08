@@ -141,6 +141,22 @@ _LOG_STD_MIN   = -5.0    # std ≈ 0.0067
 _LOG_STD_MAX   = 2.0     # std ≈ 7.39
 _RATIO_LOG_CLIP = 10.0   # exp(±10) before the PPO clip ratio
 
+# Critic safety rails. Large velocity/rotation rewards make GAE returns big; with
+# a plain MSE value loss (gradient ∝ error, unbounded) and bootstrap targets that
+# depend on the critic's own output, the value head can run away to inf. We cap
+# the targets to a finite band and use a Huber value loss so each sample's
+# gradient is bounded — the critic tracks large returns slowly instead of exploding.
+_VALUE_TARGET_CLIP = 1.0e4   # finite band for advantages/returns (kills inf/NaN)
+_HUBER_DELTA       = 10.0    # |error| beyond this contributes a linear (bounded) gradient
+
+
+def _huber(err: Any, delta: float) -> Any:
+    """Element-wise Huber loss: quadratic within ±delta, linear beyond."""
+    abs_err = jnp.abs(err)
+    quad    = jnp.minimum(abs_err, delta)
+    lin     = abs_err - quad
+    return 0.5 * quad ** 2 + delta * lin
+
 
 def _gaussian_sample(key: Any, mean: Any, log_std: Any) -> Tuple[Any, Any]:
     """Sample from N(mean, exp(log_std)) and return (action, log_prob)."""
@@ -321,7 +337,7 @@ def make_ppo_update_fn(
         pg_loss2   = -adv_norm * jnp.clip(ratio, 1 - ppo.clip_eps, 1 + ppo.clip_eps)
         actor_loss = jnp.mean(jnp.maximum(pg_loss1, pg_loss2))
 
-        value_loss = jnp.mean((value - returns) ** 2)
+        value_loss = jnp.mean(_huber(value - returns, _HUBER_DELTA))
 
         entropy = jnp.mean(
             0.5 * jnp.sum(jnp.log(2.0 * jnp.pi * jnp.e * std ** 2), axis=-1)
@@ -457,6 +473,15 @@ def make_train_step_fn(
             last_value, gamma, gae_lambda,
         )
 
+        # Keep targets finite & bounded: one inf/NaN here would propagate through
+        # the gradient (via clip_by_global_norm) to every parameter.
+        _sanitize = lambda x: jnp.clip(
+            jnp.nan_to_num(x, nan=0.0,
+                           posinf=_VALUE_TARGET_CLIP, neginf=-_VALUE_TARGET_CLIP),
+            -_VALUE_TARGET_CLIP, _VALUE_TARGET_CLIP)
+        advantages = _sanitize(advantages)
+        returns    = _sanitize(returns)
+
         # ------------------------------------------------------------------
         # Phase 4 — Flatten (T, N, ...) → (T*N, ...)
         # ------------------------------------------------------------------
@@ -484,7 +509,7 @@ def make_train_step_fn(
             pg2      = -adv_norm * jnp.clip(ratio, 1 - ppo_cfg.clip_eps,
                                                     1 + ppo_cfg.clip_eps)
             al  = jnp.mean(jnp.maximum(pg1, pg2))
-            vl  = jnp.mean((value - mb_ret) ** 2)
+            vl  = jnp.mean(_huber(value - mb_ret, _HUBER_DELTA))
             ent = jnp.mean(
                 0.5 * jnp.sum(jnp.log(2.0 * jnp.pi * jnp.e * std ** 2), axis=-1)
             )

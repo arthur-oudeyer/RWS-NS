@@ -53,15 +53,20 @@ class GenerationStats:
 
 
 def _make_stats(generation: int, results: list[ControllerResult]) -> GenerationStats:
+    import math
     import statistics as _stats
-    fitnesses = [r.fitness for r in results]
-    best      = max(results, key=lambda r: r.fitness)
+    # Guard against a non-finite fitness (e.g. a diverged individual): a single
+    # nan/inf makes statistics.stdev raise, which would crash the whole run.
+    # Treat non-finite as worst-possible so it never wins selection or stats.
+    finite = [r.fitness for r in results if math.isfinite(r.fitness)]
+    stat_vals = finite if finite else [0.0]
+    best = max(results, key=lambda r: r.fitness if math.isfinite(r.fitness) else -math.inf)
     return GenerationStats(
         generation         = generation,
         n_evaluated        = len(results),
         best_fitness       = best.fitness,
-        mean_fitness       = _stats.mean(fitnesses),
-        std_fitness        = _stats.stdev(fitnesses) if len(fitnesses) > 1 else 0.0,
+        mean_fitness       = _stats.mean(stat_vals),
+        std_fitness        = _stats.stdev(stat_vals) if len(stat_vals) > 1 else 0.0,
         best_individual_id = best.individual_id,
         best_raw_scores    = best.raw_scores,
     )

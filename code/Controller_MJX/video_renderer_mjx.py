@@ -341,6 +341,10 @@ def rollout_to_video_mjx(
             total_reward += float(reward)
 
             mj_data = mjx_state_to_mj_data(mj_model, state)
+            # Stop if physics diverged — keeps the returned metrics finite.
+            if not bool(np.all(np.isfinite(mj_data.qpos[:7]))):
+                terminated = True
+                break
             tz = float(mj_data.qpos[2])
             max_torso_height = max(max_torso_height, tz)
             height_sum += tz

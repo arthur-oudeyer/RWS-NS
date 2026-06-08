@@ -343,6 +343,9 @@ def main() -> None:
     p.add_argument("--envs",        type=int,   default=2048)
     p.add_argument("--rollout",     type=int,   default=32)
     p.add_argument("--episode",     type=float, default=2.5, help="simulation seconds per episode")
+    p.add_argument("--prediction-factor", type=float, default=-30.0, dest="prediction_factor",
+                   help="action→joint delta scale = factor/ctrl_freq; smaller |value| = "
+                        "slower, smoother, more stable robot (CPU baseline is -60)")
     p.add_argument("--seed",        type=int,   default=11)
     p.add_argument("--out",         type=str,   default="results")
     p.add_argument("--run-id",      type=str,   default=None)
@@ -366,6 +369,7 @@ def main() -> None:
         n_envs_mjx           = args.envs,
         n_steps_per_env      = args.rollout,
         episode_duration     = args.episode,
+        prediction_factor    = args.prediction_factor,
         seed                 = args.seed,
         output_dir           = args.out,
         **{f"rw_{k}": v for k, v in _reward_defaults(target).items()
@@ -387,7 +391,8 @@ def main() -> None:
           f"generations={args.generations}")
     print(f"  PPO          : init={args.init_steps:,}  warm={args.warm_steps:,}  "
           f"envs={args.envs}  rollout={args.rollout}")
-    print(f"  episode      : {args.episode}s")
+    print(f"  episode      : {args.episode}s   pred_factor={args.prediction_factor} "
+          f"(Δ≈{abs(args.prediction_factor)/cfg.control_frequency:.2f} rad/tick)")
     print(f"  reward prior : {target.reward_prior}")
     print(f"  output       : {run_dir}/")
     print("=" * 70, flush=True)
