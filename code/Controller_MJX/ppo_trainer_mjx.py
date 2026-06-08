@@ -133,8 +133,18 @@ class Transition(NamedTuple):
 # Rollout collection
 # ---------------------------------------------------------------------------
 
+# Numerical safety rails for the Gaussian policy. The evolutionary search drives
+# a wide range of reward scales; without these, log_std can collapse toward -inf
+# (std→0 ⇒ log_prob→±inf) or the importance ratio can overflow, NaN-ing the whole
+# update. Both clamps only bite at extremes (init log_std=-0.5 ⇒ std≈0.61).
+_LOG_STD_MIN   = -5.0    # std ≈ 0.0067
+_LOG_STD_MAX   = 2.0     # std ≈ 7.39
+_RATIO_LOG_CLIP = 10.0   # exp(±10) before the PPO clip ratio
+
+
 def _gaussian_sample(key: Any, mean: Any, log_std: Any) -> Tuple[Any, Any]:
     """Sample from N(mean, exp(log_std)) and return (action, log_prob)."""
+    log_std = jnp.clip(log_std, _LOG_STD_MIN, _LOG_STD_MAX)
     std = jnp.exp(log_std)
     eps = jax.random.normal(key, mean.shape)
     action   = mean + std * eps
@@ -296,6 +306,7 @@ def make_ppo_update_fn(
 
     def _loss(params, obs, action, old_log_prob, advantage, returns):
         mean, log_std, value = jax.vmap(partial(net.apply, params))(obs)
+        log_std = jnp.clip(log_std, _LOG_STD_MIN, _LOG_STD_MAX)
         std = jnp.exp(log_std)
 
         # New log-prob
@@ -304,7 +315,7 @@ def make_ppo_update_fn(
             + jnp.sum(jnp.log(2.0 * jnp.pi * std ** 2), axis=-1)
         )
 
-        ratio      = jnp.exp(log_prob - old_log_prob)
+        ratio      = jnp.exp(jnp.clip(log_prob - old_log_prob, -_RATIO_LOG_CLIP, _RATIO_LOG_CLIP))
         adv_norm   = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
         pg_loss1   = -adv_norm * ratio
         pg_loss2   = -adv_norm * jnp.clip(ratio, 1 - ppo.clip_eps, 1 + ppo.clip_eps)
@@ -461,12 +472,13 @@ def make_train_step_fn(
         # ------------------------------------------------------------------
         def _ppo_loss(params, mb_obs, mb_act, mb_lp, mb_adv, mb_ret):
             mean, log_std, value = jax.vmap(partial(net.apply, params))(mb_obs)
+            log_std  = jnp.clip(log_std, _LOG_STD_MIN, _LOG_STD_MAX)
             std      = jnp.exp(log_std)
             log_prob = -0.5 * (
                 jnp.sum(((mb_act - mean) / std) ** 2, axis=-1)
                 + jnp.sum(jnp.log(2.0 * jnp.pi * std ** 2), axis=-1)
             )
-            ratio    = jnp.exp(log_prob - mb_lp)
+            ratio    = jnp.exp(jnp.clip(log_prob - mb_lp, -_RATIO_LOG_CLIP, _RATIO_LOG_CLIP))
             adv_norm = (mb_adv - mb_adv.mean()) / (mb_adv.std() + 1e-8)
             pg1      = -adv_norm * ratio
             pg2      = -adv_norm * jnp.clip(ratio, 1 - ppo_cfg.clip_eps,

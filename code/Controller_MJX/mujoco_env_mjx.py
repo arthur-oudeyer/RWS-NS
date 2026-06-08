@@ -382,6 +382,14 @@ def _count_foot_contacts(
     return jnp.sum(per_foot.astype(jnp.int32))
 
 
+# Numerical safety rails for physics divergence (see _step / _step_rw).
+# MJX integration can blow up to inf/NaN for an unlucky reward/action combo;
+# these bands only bite on pathological values (normal rewards ~±10, obs ~±10)
+# and keep a single bad env from poisoning GAE / the optimiser with NaNs.
+_REWARD_CLIP = 100.0
+_OBS_CLIP    = 100.0
+
+
 def _read_sensors(
     data:      Any,   # mjx.Data
     n_joints:  int,   # Python int
@@ -538,13 +546,22 @@ def make_env_fns(
         # Check fall both before and after physics: torso collision can push
         # the body back above fall_height in one step, so pre-physics position
         # must also be checked to avoid "healing" a fallen state.
-        fell_now        = (sensors.torso_height < fall_h) | (sensors_pre.torso_height < fall_h)
+        # Divergence guard (see _step_rw): non-finite physics → terminate + reset,
+        # and keep reward/obs finite.
+        blew_up         = ~(jnp.all(jnp.isfinite(data.qpos))
+                            & jnp.all(jnp.isfinite(data.qvel)))
+        fell_now        = ((sensors.torso_height < fall_h)
+                           | (sensors_pre.torso_height < fall_h) | blew_up)
         fell_transition = fell_now & ~state.fell     # fires exactly once
         fell            = state.fell | fell_now
 
         reward = compute_step_reward_jax(
             rw_vec, sensors, action, state.prev_action,
             fell_transition, state.initial_torso_pos,
+        )
+        reward = jnp.clip(
+            jnp.nan_to_num(reward, nan=0.0, posinf=_REWARD_CLIP, neginf=-_REWARD_CLIP),
+            -_REWARD_CLIP, _REWARD_CLIP,
         )
 
         terminated = fell
@@ -559,7 +576,8 @@ def make_env_fns(
             initial_torso_pos = state.initial_torso_pos,
             fell              = fell,
         )
-        obs = _build_obs(new_state, n_joints)
+        obs = jnp.nan_to_num(_build_obs(new_state, n_joints), nan=0.0,
+                             posinf=_OBS_CLIP, neginf=-_OBS_CLIP)
         return new_state, obs, reward, done
 
     # ---- JIT-compile single-env versions -----------------------------------
@@ -749,13 +767,24 @@ def make_reward_agnostic_batch_fns(
         new_step_idx = state.step_idx + jnp.int32(1)
         sensors      = _read_sensors(data, n_joints, n_feet, foot_gids)
 
-        fell_now        = sensors.torso_height < fall_h
+        # Physics-divergence guard: if MJX integration blew up (qpos/qvel become
+        # non-finite for an unlucky reward/action combo), terminate like a fall
+        # so the env auto-resets, and keep reward/obs finite below so the NaN
+        # never reaches GAE / the optimiser — one NaN there poisons every param
+        # and stalls the GPU on denormals.
+        blew_up         = ~(jnp.all(jnp.isfinite(data.qpos))
+                            & jnp.all(jnp.isfinite(data.qvel)))
+        fell_now        = (sensors.torso_height < fall_h) | blew_up
         fell_transition = fell_now & ~state.fell
         fell            = state.fell | fell_now
 
         reward = compute_step_reward_jax(
             rw_vec, sensors, action, state.prev_action,
             fell_transition, state.initial_torso_pos,
+        )
+        reward = jnp.clip(
+            jnp.nan_to_num(reward, nan=0.0, posinf=_REWARD_CLIP, neginf=-_REWARD_CLIP),
+            -_REWARD_CLIP, _REWARD_CLIP,
         )
         terminated = fell
         truncated  = new_step_idx >= jnp.int32(max_steps_)
@@ -769,7 +798,9 @@ def make_reward_agnostic_batch_fns(
             initial_torso_pos = state.initial_torso_pos,
             fell              = fell,
         )
-        return new_state, _build_obs(new_state, n_joints), reward, done
+        obs = jnp.nan_to_num(_build_obs(new_state, n_joints), nan=0.0,
+                             posinf=_OBS_CLIP, neginf=-_OBS_CLIP)
+        return new_state, obs, reward, done
 
     # vmap: states and actions over envs, rw_vec broadcast (in_axes=None)
     batch_reset     = jax.jit(jax.vmap(_reset,     in_axes=0))

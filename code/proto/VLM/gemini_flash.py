@@ -358,7 +358,7 @@ if __name__ == "__main__":
     #resp = ask_question_on_video("./video/jumper.mp4", question)
     #print(f"Question : {question} \nAnswer : {resp}")
 
-    resp = score_robot_video("./video/jumper_2.mp4", "jumping as high as possible")
+    resp = score_robot_video("./video/jumper.mp4", "jumping as high as possible")
     print("✅ Scores :")
     print(f"  Observation     : {resp.get('observation')}")
     print(f"  Interpretation  : {resp.get('interpretation')}")
