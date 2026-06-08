@@ -152,7 +152,8 @@ class Target:
     metric_fn:     Callable[[dict], float]
     metric_name:   str
     unit:          str = ""
-    description:   str = ""
+    description:   str = ""                                  # metric description (human/filename)
+    vlm_target:    str = ""                                  # behaviour description sent to the VLM grader
     descriptor_fn: Optional[Callable[[dict], dict]] = None   # for MAP-Elites later
 
 
@@ -164,13 +165,14 @@ TARGETS: dict[str, Target] = {
             "torso_height_reward":      1.0,    # reward being high off the ground
             "upright_bonus":            0.3,    # stay roughly upright
             "alive_bonus":              0.1,    # don't terminate early
-            "energy_penalty":           0.001,  # mild effort cost
+            "energy_penalty":           0.005,  # mild effort cost
             "fall_penalty":             5.0,    # discourage crashing through the floor
         },
         metric_fn   = jump_height_metric,
         metric_name = "jump_height",
         unit        = "m",
         description = "peak torso height above spawn",
+        vlm_target  = "jump as high as possible off the ground using its legs",
     ),
     "walk": Target(
         name        = "walk",
@@ -178,30 +180,32 @@ TARGETS: dict[str, Target] = {
             "forward_velocity":    1.0,    # reward moving in +x
             "lateral_drift":       0.1,    # discourage sideways drift
             "upright_bonus":       0.5,    # stay upright while moving
-            "height_target_reward":0.3,    # keep torso near spawn height
+            "height_target_reward":1.0,    # keep torso near spawn height
             "alive_bonus":         0.1,
-            "energy_penalty":      0.001,
+            "energy_penalty":      0.005,
             "fall_penalty":        5.0,
         },
         metric_fn   = forward_distance_metric,
         metric_name = "forward_distance",
         unit        = "m",
         description = "net forward (+x) displacement",
+        vlm_target  = "walk forward fast and continuously while staying upright",
     ),
     "rotate": Target(
         name        = "rotate",
         reward_prior= {
             "torso_rotation_reward": 1.0,    # reward |yaw angular velocity|
             "upright_bonus":         0.5,    # spin while staying upright
-            "height_target_reward":  0.3,    # don't collapse
+            "height_target_reward":  1.0,    # don't collapse
             "alive_bonus":           0.1,
-            "energy_penalty":        0.001,
+            "energy_penalty":        0.005,
             "fall_penalty":          5.0,
         },
         metric_fn   = rotation_metric,
         metric_name = "abs_yaw",
         unit        = "rad",
         description = "total accumulated yaw rotation",
+        vlm_target  = "spin/rotate in place continuously about the vertical axis while staying upright",
     ),
     "crawl": Target(
         name        = "crawl",
@@ -216,6 +220,7 @@ TARGETS: dict[str, Target] = {
         metric_name = "path_length",
         unit        = "m",
         description = "total distance travelled along the path",
+        vlm_target  = "crawl forward with the torso low to the ground",
     ),
 }
 
@@ -236,14 +241,19 @@ class EvoExperimentMJX(MuLambdaEvolutionMJX):
     """
     Same training/selection as MuLambdaEvolutionMJX, but the render step:
       1. rolls out the policy (full physics) and reads its info dict,
-      2. computes the performance score via the active grader's metric,
-      3. names the MP4  gen_{G}_id_{ID}_score_{score:.3f}.mp4,
-      4. registers (video_path -> info) with the grader so score_batch can read it.
+      2. names the MP4 by the target's PHYSICAL metric (always available):
+         gen_{G}_id_{ID}_score_{metric:.3f}.mp4 — useful for eyeballing results
+         regardless of which grader drives selection,
+      3. if the active grader records rollout info (PerformanceGrader), registers
+         (video_path -> info) so its score_batch can read the physics quantity.
 
-    `metric_label` / `metric_unit` are set by main() for human-readable logging;
-    they do not affect what is optimised (that is the grader's metric_fn).
+    The grader's fitness (physical metric for PerformanceGrader, or the VLM score
+    for LocomotionGrader) is computed later in evaluate_batch and is what drives
+    selection. `metric_fn`/`metric_label`/`metric_unit` only affect the filename
+    and the per-render log line.
     """
 
+    metric_fn:    Callable[[dict], float] = staticmethod(lambda info: 0.0)
     metric_label: str = "score"
     metric_unit:  str = ""
 
@@ -284,15 +294,17 @@ class EvoExperimentMJX(MuLambdaEvolutionMJX):
             deterministic  = True,
         )
 
-        # Name the file with the score, then register under the FINAL path so
-        # score_batch (keyed by spec.video_path == final) finds the info.
-        score = self._active_grader.score_of(info)
-        final = videos / f"gen_{generation}_id_{individual_id}_score_{score:.3f}.mp4"
+        # Name the file by the PHYSICAL metric, then (if the grader records info)
+        # register under the FINAL path so score_batch can read the physics value.
+        metric = float(self.metric_fn(info))
+        final = videos / f"gen_{generation}_id_{individual_id}_score_{metric:.3f}.mp4"
         os.replace(tmp, final)
-        self._active_grader.register(str(final), info)
+        register = getattr(self._active_grader, "register", None)
+        if callable(register):
+            register(str(final), info)
 
         print(f"      rendered id={individual_id}  "
-              f"{self.metric_label}={score:.3f}{self.metric_unit}  "
+              f"{self.metric_label}={metric:.3f}{self.metric_unit}  "
               f"peak={info['max_torso_height']:.3f}m  "
               f"dist={info['horizontal_distance']:.3f}m  "
               f"yaw={info['abs_yaw']:.2f}rad  "
@@ -325,6 +337,55 @@ def _print_gen(generation: int, n_gen: int, results, archive, elapsed: float,
 
 
 # ---------------------------------------------------------------------------
+# Grader construction
+# ---------------------------------------------------------------------------
+
+def _build_grader(args, target: Target, run_dir: Path):
+    """
+    Return (grader, fitness_label, fitness_unit, grader_desc).
+
+    performance : deterministic physics metric (PerformanceGrader) — fitness is
+                  the target's metric, in physical units.
+    vlm         : Gemini scores the rendered video (vlm_grader.LocomotionGrader)
+                  — fitness ∈ [0,1] from coherence/originality/interest.
+    """
+    if args.grader == "performance":
+        grader = PerformanceGrader(metric_fn=target.metric_fn,
+                                   metric_name=target.metric_name,
+                                   descriptor_fn=target.descriptor_fn)
+        return grader, target.metric_name, target.unit, f"performance[{target.metric_name}]"
+
+    # ---- VLM grader --------------------------------------------------------
+    from vlm_grader import LocomotionGrader
+    from gemini_prompts import make_prompt_config
+
+    api_key = ""
+    if not args.fake_vlm:
+        # api_keys.py lives at the repo code/ root (one level above Controller_MJX).
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        try:
+            import api_keys
+            api_key = api_keys.APIKEY_GEMINI
+        except Exception as e:
+            raise SystemExit(
+                f"[grader] --grader vlm needs APIKEY_GEMINI in code/api_keys.py "
+                f"(or use --fake-vlm). Import failed: {e}")
+
+    prompt_cfg = make_prompt_config(target.name, target.vlm_target or target.description)
+    grader = LocomotionGrader(
+        api_key           = api_key,
+        prompt_config     = prompt_cfg,
+        model_name        = args.vlm_model,
+        batch_size        = args.vlm_batch,
+        fake              = args.fake_vlm,
+        response_log_path = str(run_dir / "vlm_responses.jsonl"),
+        debug             = True,
+    )
+    desc = f"vlm[{args.vlm_model}{' FAKE' if args.fake_vlm else ''}] → {target.vlm_target!r}"
+    return grader, "vlm", "", desc
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -343,12 +404,22 @@ def main() -> None:
     p.add_argument("--envs",        type=int,   default=2048)
     p.add_argument("--rollout",     type=int,   default=32)
     p.add_argument("--episode",     type=float, default=2.5, help="simulation seconds per episode")
-    p.add_argument("--prediction-factor", type=float, default=-30.0, dest="prediction_factor",
+    p.add_argument("--prediction-factor", type=float, default=-15.0, dest="prediction_factor",
                    help="action→joint delta scale = factor/ctrl_freq; smaller |value| = "
                         "slower, smoother, more stable robot (CPU baseline is -60)")
     p.add_argument("--seed",        type=int,   default=11)
     p.add_argument("--out",         type=str,   default="results")
     p.add_argument("--run-id",      type=str,   default=None)
+    p.add_argument("--grader",      choices=["performance", "vlm"], default="performance",
+                   help="fitness scorer: deterministic physics metric (performance) or "
+                        "Gemini VLM on the rendered video (vlm)")
+    p.add_argument("--vlm-model",   type=str, default="gemini-3-flash-preview", dest="vlm_model",
+                   help="Gemini model id (vlm grader only)")
+    p.add_argument("--vlm-batch",   type=int, default=6, dest="vlm_batch",
+                   help="videos per Gemini request (vlm grader only)")
+    p.add_argument("--fake-vlm",    action="store_true", dest="fake_vlm",
+                   help="vlm grader returns synthetic scores — no upload / no API cost "
+                        "(for testing the wiring)")
     p.add_argument("--gpu",         type=str, default=None,
                    help="GPU index to pin (sets CUDA_VISIBLE_DEVICES before JAX init; "
                         "default: auto-pick the freest GPU, never GPU 0)")
@@ -381,11 +452,16 @@ def main() -> None:
     cfg.save(str(run_dir / "config.json"))
     indiv_log = run_dir / "individuals_log.jsonl"
 
-    label, unit = target.metric_name, target.unit
+    # Grader drives selection; the physical metric always names the videos.
+    grader, fit_label, fit_unit, grader_desc = _build_grader(args, target, run_dir)
+
     print("=" * 70)
     print(f"  EVO EXPERIMENT (μ+λ)   target={target.name!r}   run_id={run_id}")
     print("=" * 70)
-    print(f"  objective    : {target.description}  (fitness = {label}{', '+unit if unit else ''})")
+    print(f"  objective    : {target.description}")
+    print(f"  grader       : {grader_desc}   (fitness drives selection)")
+    print(f"  video metric : {target.metric_name}{(' ['+target.unit+']') if target.unit else ''} "
+          f"(baked into each video filename)")
     print(f"  morphology   : {ExperimentConfig.morphology}")
     print(f"  population   : pop0={args.pop}  μ={args.mu}  λ={args.lambda_}  "
           f"generations={args.generations}")
@@ -397,13 +473,12 @@ def main() -> None:
     print(f"  output       : {run_dir}/")
     print("=" * 70, flush=True)
 
-    rng    = np.random.default_rng(cfg.seed)
-    grader = PerformanceGrader(metric_fn=target.metric_fn, metric_name=target.metric_name,
-                               descriptor_fn=target.descriptor_fn)
-    evo    = EvoExperimentMJX(cfg, run_dir=run_dir, rng=rng)
+    rng = np.random.default_rng(cfg.seed)
+    evo = EvoExperimentMJX(cfg, run_dir=run_dir, rng=rng)
     evo.verbose_training = True   # print per-update PPO progress for each individual
-    evo.metric_label     = label
-    evo.metric_unit      = unit
+    evo.metric_fn        = target.metric_fn       # physical metric for video naming / log
+    evo.metric_label     = target.metric_name
+    evo.metric_unit      = target.unit
     archive = MuLambdaArchive(mu=cfg.mu)
 
     # ---- Generation 0 (from scratch) ---------------------------------------
@@ -413,7 +488,7 @@ def main() -> None:
     init_results, id_counter = evo.initialise(grader, id_counter=0)
     archive.update(init_results)
     _log_individuals(indiv_log, init_results)
-    _print_gen(0, args.generations, init_results, archive, time.perf_counter() - t0, label, unit)
+    _print_gen(0, args.generations, init_results, archive, time.perf_counter() - t0, fit_label, fit_unit)
     archive.save(str(run_dir / "archive_gen0000.json"))
 
     # ---- Evolution loop (gens 1 .. generations-1) --------------------------
@@ -426,7 +501,7 @@ def main() -> None:
         archive.update(results)
         _log_individuals(indiv_log, [r for r in results if r.individual_id >= prev_id])
         _print_gen(generation, args.generations, results, archive,
-                   time.perf_counter() - t0, label, unit)
+                   time.perf_counter() - t0, fit_label, fit_unit)
         archive.save(str(run_dir / f"archive_gen{generation:04d}.json"))
 
     archive.save(str(run_dir / "archive_final.json"))
@@ -436,7 +511,7 @@ def main() -> None:
     best = archive.best()
     if best:
         print(f"\n  Best {target.name}: id={best.individual_id}  "
-              f"{label}={best.fitness:.3f}{unit}")
+              f"{fit_label}={best.fitness:.3f}{fit_unit}")
         print(f"  Video      : {best.video_path}")
     print("=" * 70, flush=True)
 
