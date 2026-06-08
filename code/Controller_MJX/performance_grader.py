@@ -60,6 +60,26 @@ def max_height_metric(info: dict) -> float:
     return float(info.get("max_torso_height", 0.0))
 
 
+def forward_distance_metric(info: dict) -> float:
+    """Net forward (+x) displacement from spawn to end of episode (metres)."""
+    return float(info.get("forward_distance", 0.0))
+
+
+def horizontal_distance_metric(info: dict) -> float:
+    """Straight-line xy displacement from spawn to end of episode (metres)."""
+    return float(info.get("horizontal_distance", 0.0))
+
+
+def path_length_metric(info: dict) -> float:
+    """Total xy distance travelled along the path (metres) — rewards moving a lot."""
+    return float(info.get("path_length", 0.0))
+
+
+def rotation_metric(info: dict) -> float:
+    """Total accumulated yaw rotation (radians, unwrapped) — rewards spinning."""
+    return float(info.get("abs_yaw", 0.0))
+
+
 # ---------------------------------------------------------------------------
 # PerformanceGrader
 # ---------------------------------------------------------------------------

@@ -41,7 +41,7 @@ from typing import Optional
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
-from morphology import MorphologyManager, RobotMorphology, NewMorph, MutateMorphology, compute_spawn_height
+from morphology import MorphologyManager, RobotMorphology, NewMorph, MutateMorphology, compute_spawn_height, get_preconfigured_morph
 
 # Lazy-import mujoco so the module can be imported even if mujoco is absent
 # (e.g. for reading configs or prompt sets without rendering).
@@ -361,6 +361,12 @@ if __name__ == "__main__":
 
     config   = RenderConfig(width=256, height=256, debug=True)
     renderer = MorphologyRenderer(config)
+
+    morph = get_preconfigured_morph('robot')
+    img = renderer.render(morph)
+
+    renderer.close()
+    exit(0)
 
     # --- 0. Render standard morphologies ---
     print("\n[0] Rendering NewMorph()\n")

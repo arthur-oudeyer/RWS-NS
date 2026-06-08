@@ -2,10 +2,19 @@
 """
 jump_experiment_mjx.py
 ======================
-Simple (μ+λ) evolutionary experiment to validate the EA machinery BEFORE the
-VLM grader is added. Objective: make the tripod JUMP. Each individual is scored
-by an external performance function (peak torso height above spawn over a short
-simulation) instead of a Gemini call — see performance_grader.py.
+General (μ+λ) evolutionary experiment to validate the EA machinery BEFORE the
+VLM grader is added. The objective is selectable with `--target`:
+
+    jump    make the tripod leave the ground   (peak torso height above spawn)
+    walk    travel forward                      (net +x displacement)
+    rotate  spin in place                       (accumulated yaw rotation)
+    crawl   move while staying low              (path length travelled)
+
+Each individual is scored by a deterministic external performance function of
+its rollout (see performance_grader.py) instead of a Gemini call. Both the
+reward-weight prior the search starts from AND the fitness metric come from the
+selected target's entry in the TARGETS registry below — to add a new objective,
+add one TARGETS entry; nothing else changes.
 
 What it exercises
 -----------------
@@ -15,25 +24,24 @@ What it exercises
   - per-individual video naming with the score baked in
 
 Each rendered rollout is saved as:
-    {out}/{run_id}/videos/gen_{G}_id_{ID}_score_{jump:.3f}.mp4
+    {out}/{run_id}/videos/gen_{G}_id_{ID}_score_{score:.3f}.mp4
 
 Terminal-only — no UI. Everything is printed and logged to JSONL/archive files
 under {out}/{run_id}/ (same layout as experiment_mjx.py).
 
 Usage
 -----
-    CUDA_VISIBLE_DEVICES=7 python jump_experiment_mjx.py \
-        --generations 4 --pop 5 --lambda 5 \
-        --init-steps 2000000 --warm-steps 1000000 \
-        --envs 4096 --rollout 64 --episode 2.0
+    python jump_experiment_mjx.py --target jump      # default
+    python jump_experiment_mjx.py --target walk
+    python jump_experiment_mjx.py --target rotate --gpu 3
 
 Notes
 -----
-The reward prior is jump-oriented (vertical velocity + torso height, forward
-velocity off). Mutation is multiplicative log-normal, so terms left at 0.0 stay
-disabled — keeping the search low-dimensional around the jump prior. Selection
-is on the *measured* jump height, so the EA discovers which weight magnitudes
-actually produce jumping.
+Each prior leaves only a handful of terms non-zero; mutation is multiplicative
+log-normal, so terms left at 0.0 stay disabled — keeping the search in a small
+objective-relevant subspace. Selection is on the *measured* metric, so the EA
+discovers which weight magnitudes actually produce the behaviour. The priors are
+sensible starting points, not tuned optima.
 """
 
 from __future__ import annotations
@@ -96,8 +104,9 @@ sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
 import argparse
 import json
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Optional
 
 import numpy as np
 import jax
@@ -107,7 +116,14 @@ from archive            import MuLambdaArchive
 from data_handler       import result_to_dict
 from evolution_mjx      import MuLambdaEvolutionMJX, _videos_dir
 from video_renderer_mjx import rollout_to_video_mjx
-from performance_grader import PerformanceGrader, jump_height_metric
+from performance_grader import (
+    PerformanceGrader,
+    jump_height_metric,
+    max_height_metric,
+    forward_distance_metric,
+    path_length_metric,
+    rotation_metric,
+)
 
 # Persistent JIT cache (saves the ~60 s XLA compile between runs of matching shape).
 _jax_cache_dir = os.path.expanduser("~/.cache/jax_mjx")
@@ -118,41 +134,118 @@ jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.0)
 
 
 # ---------------------------------------------------------------------------
-# Jump-oriented reward prior
+# Target registry — reward prior + fitness metric per objective
 # ---------------------------------------------------------------------------
-# Only these terms are non-zero; multiplicative mutation keeps every other term
-# frozen at 0.0, so the EA searches a small jump-relevant subspace.
+# Each Target pairs the reward-weight prior the EA starts mutating from with the
+# external performance function it is selected on. Only the terms named in
+# `reward_prior` are non-zero; every other RewardWeights term is frozen at 0.0
+# (multiplicative mutation keeps zeros at zero), so the search stays in a small
+# objective-relevant subspace. `metric_fn` reads a scalar off the renderer's
+# info dict (see video_renderer_mjx.rollout_to_video_mjx for available keys).
+#
+# To add an objective: add one Target to TARGETS. That is the only change.
 
-JUMP_REWARD_PRIOR = {
-    "vertical_velocity_reward": 1.0,    # reward upward torso velocity
-    "torso_height_reward":      1.0,    # reward being high off the ground
-    "upright_bonus":            0.3,    # stay roughly upright
-    "alive_bonus":              0.1,    # don't terminate early
-    "energy_penalty":           0.001,  # mild effort cost
-    "fall_penalty":             5.0,    # discourage crashing through the floor
+@dataclass
+class Target:
+    name:          str
+    reward_prior:  dict
+    metric_fn:     Callable[[dict], float]
+    metric_name:   str
+    unit:          str = ""
+    description:   str = ""
+    descriptor_fn: Optional[Callable[[dict], dict]] = None   # for MAP-Elites later
+
+
+TARGETS: dict[str, Target] = {
+    "jump": Target(
+        name        = "jump",
+        reward_prior= {
+            "vertical_velocity_reward": 1.0,    # reward upward torso velocity
+            "torso_height_reward":      1.0,    # reward being high off the ground
+            "upright_bonus":            0.3,    # stay roughly upright
+            "alive_bonus":              0.1,    # don't terminate early
+            "energy_penalty":           0.001,  # mild effort cost
+            "fall_penalty":             5.0,    # discourage crashing through the floor
+        },
+        metric_fn   = jump_height_metric,
+        metric_name = "jump_height",
+        unit        = "m",
+        description = "peak torso height above spawn",
+    ),
+    "walk": Target(
+        name        = "walk",
+        reward_prior= {
+            "forward_velocity":    1.0,    # reward moving in +x
+            "lateral_drift":       0.1,    # discourage sideways drift
+            "upright_bonus":       0.5,    # stay upright while moving
+            "height_target_reward":0.3,    # keep torso near spawn height
+            "alive_bonus":         0.1,
+            "energy_penalty":      0.001,
+            "fall_penalty":        5.0,
+        },
+        metric_fn   = forward_distance_metric,
+        metric_name = "forward_distance",
+        unit        = "m",
+        description = "net forward (+x) displacement",
+    ),
+    "rotate": Target(
+        name        = "rotate",
+        reward_prior= {
+            "torso_rotation_reward": 1.0,    # reward |yaw angular velocity|
+            "upright_bonus":         0.5,    # spin while staying upright
+            "height_target_reward":  0.3,    # don't collapse
+            "alive_bonus":           0.1,
+            "energy_penalty":        0.001,
+            "fall_penalty":          5.0,
+        },
+        metric_fn   = rotation_metric,
+        metric_name = "abs_yaw",
+        unit        = "rad",
+        description = "total accumulated yaw rotation",
+    ),
+    "crawl": Target(
+        name        = "crawl",
+        reward_prior= {
+            "forward_velocity": 1.0,    # reward moving forward
+            "contact_reward":   0.2,    # reward keeping feet/body in contact (low)
+            "alive_bonus":      0.1,
+            "energy_penalty":   0.001,
+            "fall_penalty":     5.0,    # low so it can move on its belly without big penalty
+        },
+        metric_fn   = path_length_metric,
+        metric_name = "path_length",
+        unit        = "m",
+        description = "total distance travelled along the path",
+    ),
 }
 
 
-def _jump_reward_defaults() -> dict:
-    """Full reward-weight dict: jump prior on top of an all-zero base."""
+def _reward_defaults(target: Target) -> dict:
+    """Full reward-weight dict: the target's prior on top of an all-zero base."""
     from reward import RewardWeights
     base = {name: 0.0 for name in RewardWeights.field_names()}
-    base.update(JUMP_REWARD_PRIOR)
+    base.update(target.reward_prior)
     return base
 
 
 # ---------------------------------------------------------------------------
-# JumpEvolutionMJX — μ+λ with custom render naming + metric registration
+# EvoExperimentMJX — μ+λ with custom render naming + metric registration
 # ---------------------------------------------------------------------------
 
-class JumpEvolutionMJX(MuLambdaEvolutionMJX):
+class EvoExperimentMJX(MuLambdaEvolutionMJX):
     """
     Same training/selection as MuLambdaEvolutionMJX, but the render step:
       1. rolls out the policy (full physics) and reads its info dict,
       2. computes the performance score via the active grader's metric,
       3. names the MP4  gen_{G}_id_{ID}_score_{score:.3f}.mp4,
       4. registers (video_path -> info) with the grader so score_batch can read it.
+
+    `metric_label` / `metric_unit` are set by main() for human-readable logging;
+    they do not affect what is optimised (that is the grader's metric_fn).
     """
+
+    metric_label: str = "score"
+    metric_unit:  str = ""
 
     # initialise/step receive the grader; stash it for _render to use.
     def initialise(self, grader, id_counter: int = 0):
@@ -198,8 +291,11 @@ class JumpEvolutionMJX(MuLambdaEvolutionMJX):
         os.replace(tmp, final)
         self._active_grader.register(str(final), info)
 
-        print(f"      rendered id={individual_id}  jump={info['jump_height']:.3f}m  "
+        print(f"      rendered id={individual_id}  "
+              f"{self.metric_label}={score:.3f}{self.metric_unit}  "
               f"peak={info['max_torso_height']:.3f}m  "
+              f"dist={info['horizontal_distance']:.3f}m  "
+              f"yaw={info['abs_yaw']:.2f}rad  "
               f"steps={info['n_steps']}  -> {final.name}", flush=True)
         return str(final)
 
@@ -214,16 +310,17 @@ def _log_individuals(path: Path, results) -> None:
             f.write(json.dumps(result_to_dict(r)) + "\n")
 
 
-def _print_gen(generation: int, n_gen: int, results, archive, elapsed: float) -> None:
+def _print_gen(generation: int, n_gen: int, results, archive, elapsed: float,
+               label: str, unit: str) -> None:
     stats = archive.history[-1] if archive.history else None
     best  = archive.best()
     print(f"\n[gen {generation + 1}/{n_gen}]  evaluated={len(results)}  "
-          f"best_jump={best.fitness:.3f}m (id={best.individual_id})  "
-          f"mean={stats.mean_fitness:.3f}m  std={stats.std_fitness:.3f}  "
+          f"best_{label}={best.fitness:.3f}{unit} (id={best.individual_id})  "
+          f"mean={stats.mean_fitness:.3f}{unit}  std={stats.std_fitness:.3f}  "
           f"{elapsed:.1f}s", flush=True)
     for r in sorted(results, key=lambda x: x.fitness, reverse=True):
         tag = "★" if r.individual_id == best.individual_id else " "
-        print(f"   {tag} id={r.individual_id:>3}  jump={r.fitness:.3f}m  "
+        print(f"   {tag} id={r.individual_id:>3}  {label}={r.fitness:.3f}{unit}  "
               f"parent={r.parent_id}  {Path(r.video_path).name}", flush=True)
 
 
@@ -234,6 +331,8 @@ def _print_gen(generation: int, n_gen: int, results, archive, elapsed: float) ->
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--target",      choices=list(TARGETS), default="jump",
+                   help="objective to evolve toward (selects reward prior + fitness metric)")
     p.add_argument("--generations", type=int,   default=4)
     p.add_argument("--pop",         type=int,   default=5,  help="initial population size (gen 0)")
     p.add_argument("--mu",          type=int,   default=2,  help="parents kept per generation")
@@ -247,13 +346,13 @@ def main() -> None:
     p.add_argument("--seed",        type=int,   default=11)
     p.add_argument("--out",         type=str,   default="results")
     p.add_argument("--run-id",      type=str,   default=None)
-    p.add_argument("--metric",      choices=["jump", "max_height"], default="jump")
     p.add_argument("--gpu",         type=str, default=None,
                    help="GPU index to pin (sets CUDA_VISIBLE_DEVICES before JAX init; "
                         "default: auto-pick the freest GPU, never GPU 0)")
     args = p.parse_args()
 
-    run_id = args.run_id or time.strftime("jump_%Y%m%d_%H%M%S")
+    target = TARGETS[args.target]
+    run_id = args.run_id or time.strftime(f"{target.name}_%Y%m%d_%H%M%S")
 
     cfg = ExperimentConfig(
         run_id               = run_id,
@@ -269,39 +368,37 @@ def main() -> None:
         episode_duration     = args.episode,
         seed                 = args.seed,
         output_dir           = args.out,
-        **{f"rw_{k}": v for k, v in _jump_reward_defaults().items()
+        **{f"rw_{k}": v for k, v in _reward_defaults(target).items()
            if f"rw_{k}" in ExperimentConfig.__dataclass_fields__},
     )
-
-    # Metric selection (the "external performance function").
-    if args.metric == "jump":
-        metric_fn, metric_name = jump_height_metric, "jump_height"
-    else:
-        from performance_grader import max_height_metric
-        metric_fn, metric_name = max_height_metric, "max_height"
 
     run_dir = cfg.run_dir
     run_dir.mkdir(parents=True, exist_ok=True)
     cfg.save(str(run_dir / "config.json"))
     indiv_log = run_dir / "individuals_log.jsonl"
 
+    label, unit = target.metric_name, target.unit
     print("=" * 70)
-    print(f"  JUMP EXPERIMENT (μ+λ)   run_id={run_id}")
+    print(f"  EVO EXPERIMENT (μ+λ)   target={target.name!r}   run_id={run_id}")
     print("=" * 70)
+    print(f"  objective    : {target.description}  (fitness = {label}{', '+unit if unit else ''})")
     print(f"  morphology   : {ExperimentConfig.morphology}")
     print(f"  population   : pop0={args.pop}  μ={args.mu}  λ={args.lambda_}  "
           f"generations={args.generations}")
     print(f"  PPO          : init={args.init_steps:,}  warm={args.warm_steps:,}  "
           f"envs={args.envs}  rollout={args.rollout}")
-    print(f"  episode      : {args.episode}s   metric={metric_name}")
-    print(f"  reward prior : {JUMP_REWARD_PRIOR}")
+    print(f"  episode      : {args.episode}s")
+    print(f"  reward prior : {target.reward_prior}")
     print(f"  output       : {run_dir}/")
     print("=" * 70, flush=True)
 
     rng    = np.random.default_rng(cfg.seed)
-    grader = PerformanceGrader(metric_fn=metric_fn, metric_name=metric_name)
-    evo    = JumpEvolutionMJX(cfg, run_dir=run_dir, rng=rng)
+    grader = PerformanceGrader(metric_fn=target.metric_fn, metric_name=target.metric_name,
+                               descriptor_fn=target.descriptor_fn)
+    evo    = EvoExperimentMJX(cfg, run_dir=run_dir, rng=rng)
     evo.verbose_training = True   # print per-update PPO progress for each individual
+    evo.metric_label     = label
+    evo.metric_unit      = unit
     archive = MuLambdaArchive(mu=cfg.mu)
 
     # ---- Generation 0 (from scratch) ---------------------------------------
@@ -311,7 +408,7 @@ def main() -> None:
     init_results, id_counter = evo.initialise(grader, id_counter=0)
     archive.update(init_results)
     _log_individuals(indiv_log, init_results)
-    _print_gen(0, args.generations, init_results, archive, time.perf_counter() - t0)
+    _print_gen(0, args.generations, init_results, archive, time.perf_counter() - t0, label, unit)
     archive.save(str(run_dir / "archive_gen0000.json"))
 
     # ---- Evolution loop (gens 1 .. generations-1) --------------------------
@@ -323,7 +420,8 @@ def main() -> None:
         results, id_counter = evo.step(archive, grader, generation, id_counter)
         archive.update(results)
         _log_individuals(indiv_log, [r for r in results if r.individual_id >= prev_id])
-        _print_gen(generation, args.generations, results, archive, time.perf_counter() - t0)
+        _print_gen(generation, args.generations, results, archive,
+                   time.perf_counter() - t0, label, unit)
         archive.save(str(run_dir / f"archive_gen{generation:04d}.json"))
 
     archive.save(str(run_dir / "archive_final.json"))
@@ -332,7 +430,8 @@ def main() -> None:
     archive.summary()
     best = archive.best()
     if best:
-        print(f"\n  Best jumper: id={best.individual_id}  jump={best.fitness:.3f}m")
+        print(f"\n  Best {target.name}: id={best.individual_id}  "
+              f"{label}={best.fitness:.3f}{unit}")
         print(f"  Video      : {best.video_path}")
     print("=" * 70, flush=True)
 

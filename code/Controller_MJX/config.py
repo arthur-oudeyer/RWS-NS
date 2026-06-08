@@ -78,7 +78,7 @@ class ExperimentConfig:
     init_population_size: int = 10   # 0 = strategy default
 
     # ---- Morphology / Env ----------------------------------------------------
-    morphology = "tripod" # Morphology, default None -> QUADRIPOD
+    morphology = "robot" # Morphology, default None -> QUADRIPOD
     photorealistic = True
 
     # ---- Reward weights (defaults; mutation σ controls per-gen jitter) -------

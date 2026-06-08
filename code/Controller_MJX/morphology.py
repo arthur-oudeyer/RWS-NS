@@ -328,8 +328,25 @@ HUMAN = RobotMorphology(
     torso_c=0.03,
 )
 
+ROBOT = RobotMorphology(
+    name  = "robot",
+    legs  = [
+        LegDescriptor( 60.0, [JointDescriptor(rgba=(0.8, 0.2, 0.2, 1.0))]),
+        LegDescriptor(180.0, [JointDescriptor(rgba=(0.8, 0.5, 0.2, 1.0))]),
+        LegDescriptor(300.0, [JointDescriptor(rgba=(0.8, 0.2, 0.5, 1.0))]),
+
+        LegDescriptor(120.0, [JointDescriptor(rgba=(0.4, 0.7, 0.9, 1.0), length=0.2, rest_angle=-3.14, ctrl_range=(-3.92, 0.78))]),
+        LegDescriptor(placement_angle_deg=0.0,
+                      joints=[JointDescriptor(rgba=(0.4, 0.8, 0.5, 1.0), length=0.1, rest_angle=1.57, ctrl_range=(0., 3.))],
+                      parent_leg_idx=3, parent_joint_idx=0),
+    ],
+    torso_a=0.08,
+    torso_b=0.08,
+    torso_c=0.05,
+)
+
 def get_preconfigured_morph(name: str):
-    for mo in (QUADRIPOD, TRIPOD, HEXAPOD, TRIPOD_COMPLEX, HUMAN):
+    for mo in (QUADRIPOD, TRIPOD, HEXAPOD, TRIPOD_COMPLEX, HUMAN, ROBOT):
         if mo.name == name:
             return mo
     print(f"ERROR : morphology '{name}' not found. -> Default {QUADRIPOD.name}")

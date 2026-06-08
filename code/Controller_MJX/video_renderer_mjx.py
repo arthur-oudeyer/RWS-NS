@@ -114,6 +114,12 @@ def build_policy_fn(
 # MJX → CPU data transfer
 # ---------------------------------------------------------------------------
 
+def _yaw_from_quat(q: np.ndarray) -> float:
+    """Yaw (rotation about world z) in radians from a [w, x, y, z] quaternion."""
+    w, x, y, z = float(q[0]), float(q[1]), float(q[2]), float(q[3])
+    return float(np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)))
+
+
 def mjx_state_to_mj_data(
     mj_model: mujoco.MjModel,
     state:    EnvState,
@@ -237,8 +243,17 @@ def rollout_to_video_mjx(
     Returns
     -------
     (save_path, info)
-        info = {n_frames, terminated, truncated, total_reward, n_steps,
-                spawn_height, max_torso_height, jump_height}
+        info keys:
+          n_frames, terminated, truncated, total_reward, n_steps
+          spawn_height, max_torso_height, jump_height       (vertical)
+          spawn_x, spawn_y, final_x, final_y, final_height  (positions)
+          forward_distance     net x displacement (spawn -> final)
+          horizontal_distance  straight-line xy displacement (spawn -> final)
+          path_length          total xy distance travelled along the path
+          net_yaw, abs_yaw     accumulated yaw rotation, radians (unwrapped)
+          mean_height          mean torso z over the episode
+        These cover the jump / walk / rotate / crawl objectives; metric
+        functions in performance_grader.py pick whichever scalar they need.
     """
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -294,6 +309,13 @@ def rollout_to_video_mjx(
     truncated    = False
     spawn_height = 0.0
     max_torso_height = 0.0
+    spawn_x = spawn_y = 0.0
+    height_sum = 0.0
+    height_n   = 0
+    path_length = 0.0
+    net_yaw     = 0.0
+    _prev_x = _prev_y = 0.0
+    _prev_yaw = 0.0
 
     try:
         key = jax.random.PRNGKey(seed)
@@ -303,6 +325,11 @@ def rollout_to_video_mjx(
         mj_data = mjx_state_to_mj_data(mj_model, state)
         spawn_height     = float(mj_data.qpos[2])   # free-joint torso z at reset
         max_torso_height = spawn_height
+        spawn_x, spawn_y = float(mj_data.qpos[0]), float(mj_data.qpos[1])
+        _prev_x, _prev_y = spawn_x, spawn_y
+        _prev_yaw  = _yaw_from_quat(mj_data.qpos[3:7])
+        height_sum = spawn_height
+        height_n   = 1
         frame = _render_frame(renderer1, renderer2, mj_data, cam1, cam2,
                               camera_track_torso)
         frame_q.put(frame.copy())
@@ -314,7 +341,20 @@ def rollout_to_video_mjx(
             total_reward += float(reward)
 
             mj_data = mjx_state_to_mj_data(mj_model, state)
-            max_torso_height = max(max_torso_height, float(mj_data.qpos[2]))
+            tz = float(mj_data.qpos[2])
+            max_torso_height = max(max_torso_height, tz)
+            height_sum += tz
+            height_n   += 1
+
+            tx, ty = float(mj_data.qpos[0]), float(mj_data.qpos[1])
+            path_length += float(np.hypot(tx - _prev_x, ty - _prev_y))
+            _prev_x, _prev_y = tx, ty
+
+            yaw  = _yaw_from_quat(mj_data.qpos[3:7])
+            dyaw = (yaw - _prev_yaw + np.pi) % (2.0 * np.pi) - np.pi  # unwrap to [-π, π]
+            net_yaw  += float(dyaw)
+            _prev_yaw = yaw
+
             frame = _render_frame(renderer1, renderer2, mj_data, cam1, cam2,
                                   camera_track_torso)
             frame_q.put(frame.copy())
@@ -333,15 +373,33 @@ def rollout_to_video_mjx(
         renderer1.close()
         renderer2.close()
 
+    final_x      = float(mj_data.qpos[0])
+    final_y      = float(mj_data.qpos[1])
+    final_height = float(mj_data.qpos[2])
+
     return save_path, {
-        "n_frames":         n_frames,
-        "terminated":       terminated,
-        "truncated":        truncated,
-        "total_reward":     total_reward,
-        "n_steps":          int(state.step_idx),
-        "spawn_height":     spawn_height,
-        "max_torso_height": max_torso_height,
-        "jump_height":      max(0.0, max_torso_height - spawn_height),
+        "n_frames":            n_frames,
+        "terminated":          terminated,
+        "truncated":           truncated,
+        "total_reward":        total_reward,
+        "n_steps":             int(state.step_idx),
+        # vertical
+        "spawn_height":        spawn_height,
+        "max_torso_height":    max_torso_height,
+        "jump_height":         max(0.0, max_torso_height - spawn_height),
+        "mean_height":         height_sum / max(1, height_n),
+        # planar position / locomotion
+        "spawn_x":             spawn_x,
+        "spawn_y":             spawn_y,
+        "final_x":             final_x,
+        "final_y":             final_y,
+        "final_height":        final_height,
+        "forward_distance":    final_x - spawn_x,
+        "horizontal_distance": float(np.hypot(final_x - spawn_x, final_y - spawn_y)),
+        "path_length":         path_length,
+        # rotation
+        "net_yaw":             net_yaw,
+        "abs_yaw":             abs(net_yaw),
     }
 
 
