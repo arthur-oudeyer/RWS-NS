@@ -84,27 +84,27 @@ class ExperimentConfig:
     # ---- Reward weights (defaults; mutation σ controls per-gen jitter) -------
     # Default vector — opinionated starting prior. See instruction.md §5.
     # Original 7 terms
-    rw_forward_velocity: float = 0.01
-    rw_lateral_drift:    float = 0.01
-    rw_upright_bonus:    float = 0.5
-    rw_energy_penalty:   float = 0.01
-    rw_contact_reward:   float = 0.01
+    rw_forward_velocity: float = 0.05
+    rw_lateral_drift:    float = 0.1
+    rw_upright_bonus:    float = 0.1
+    rw_energy_penalty:   float = 0.02
+    rw_contact_reward:   float = 0.02
     rw_alive_bonus:      float = 0.01
     rw_fall_penalty:     float = 10.0
     # Extended 10 terms (small positive so log-normal mutation can activate them)
-    rw_no_contact_reward:           float = 0.01
-    rw_torso_height_reward:         float = 0.01
-    rw_torso_rotation_reward:       float = 0.01
-    rw_torso_tilting_speed_reward:  float = 0.01
-    rw_limb_coordination_reward:    float = 0.01
-    rw_nervosity_reward:            float = 0.01
-    rw_smooth_reward:               float = 0.01
-    rw_vertical_velocity_reward:    float = 0.01
-    rw_lateral_velocity_reward:     float = 0.01
-    rw_joint_range_reward:          float = 0.01
-    rw_height_target_reward:        float = 10.0
-    rw_tilt_penalty:                float = 0.01
-    rw_tilt_rate_penalty:           float = 0.01
+    rw_no_contact_reward:           float = 0.02
+    rw_torso_height_reward:         float = 0.05
+    rw_torso_rotation_reward:       float = 0.05
+    rw_torso_tilting_speed_reward:  float = 0.02
+    rw_limb_coordination_reward:    float = 0.05
+    rw_nervosity_reward:            float = 0.02
+    rw_smooth_reward:               float = 0.05
+    rw_vertical_velocity_reward:    float = 0.02
+    rw_lateral_velocity_reward:     float = 0.05
+    rw_joint_range_reward:          float = 0.03
+    rw_height_target_reward:        float = 2.0
+    rw_tilt_penalty:                float = 0.02
+    rw_tilt_rate_penalty:           float = 0.005
     rw_all_feet_planted_bonus:      float = 0.01
     rw_vertical_velocity_penalty:     float = 0.01
     rw_horizontal_velocity_penalty:    float = 0.01
@@ -134,6 +134,11 @@ class ExperimentConfig:
     vf_coef:          float = 0.5
     n_steps_per_env:  int   = 32   # PPO rollout length before each update
     batch_size:       int   = 256
+
+    # Print throttled per-update PPO progress for each individual during
+    # training (update #, steps/s, mean reward, π/V losses, entropy) — same
+    # monitoring output as jump_experiment_mjx.py. Throttled to ~every 5 s.
+    verbose_training: bool = True
 
     # ---- Env / episode ------------------------------------------------------
     # Episode length used both for PPO rollouts and for the recorded MP4.

@@ -278,6 +278,7 @@ def run_mjx(
     archive = _make_archive(cfg)
     rng     = np.random.default_rng(cfg.seed)
     evo: BaseEvolutionMJX = make_evolution_mjx(cfg, run_dir=run_dir, rng=rng)
+    evo.verbose_training = cfg.verbose_training   # per-update PPO progress (fps, rw, losses)
     print(f"[experiment_mjx] Archive + evolution ready ({cfg.strategy}).")
 
     # ---- Generation 0 --------------------------------------------------------
@@ -348,6 +349,7 @@ def resume_mjx(run_dir: Union[str, Path], grader=None):
 
     rng = np.random.default_rng(cfg.seed + start_gen)
     evo = make_evolution_mjx(cfg, run_dir=run_dir, rng=rng)
+    evo.verbose_training = cfg.verbose_training   # per-update PPO progress (fps, rw, losses)
 
     for generation in range(start_gen, cfg.n_generations + 1):
         t0 = time.perf_counter()
