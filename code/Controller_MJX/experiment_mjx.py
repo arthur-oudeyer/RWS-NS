@@ -42,31 +42,72 @@ from data_handler  import ControllerResult, result_to_dict
 # Archive / grader factories (identical to experiment.py)
 # ---------------------------------------------------------------------------
 
+def _resolve_target_file(cfg: ExperimentConfig) -> Path:
+    """Path to the natural-language target file (relative → package dir)."""
+    p = Path(cfg.target_file)
+    if not p.is_absolute():
+        p = Path(__file__).resolve().parent / p
+    return p
+
+
+def _read_target_behaviour(cfg: ExperimentConfig) -> str:
+    """Read the one-line target behaviour the VLM grades against."""
+    path = _resolve_target_file(cfg)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Target file not found: {path}\n"
+            f"Create it (e.g. `nano {path}`) with a natural-language description "
+            f"of the behaviour to evolve toward, e.g.:\n"
+            f"  a forced and awkward gait"
+        )
+    text = path.read_text(encoding="utf-8").strip()
+    if not text:
+        raise ValueError(f"Target file is empty: {path}  (edit it with `nano`).")
+    return text
+
+
 def _make_grader(cfg: ExperimentConfig):
     if cfg.grader_type != "gemini":
-        raise NotImplementedError(f"grader_type={cfg.grader_type!r} not supported.")
-    from gemini_prompts import get_locomotion_prompt_set
-    from grader import LocomotionGrader
+        raise NotImplementedError(f"grader_type={cfg.grader_type!r} not supported (VLM only).")
 
-    desc_cfg = None
-    try:
-        if cfg.descriptor_config_name:
-            from descriptor import get_descriptor_config
-            desc_cfg = get_descriptor_config(cfg.descriptor_config_name)
-    except Exception:
-        desc_cfg = None
+    from gemini_prompts import make_prompt_config, LocomotionScoringWeights
+    from vlm_grader     import LocomotionGrader
+
+    target  = _read_target_behaviour(cfg)
+    weights = LocomotionScoringWeights(
+        coherence   = cfg.vlm_weight_coherence,
+        originality = cfg.vlm_weight_originality,
+        interest    = cfg.vlm_weight_interest,
+    )
+    prompt_cfg = make_prompt_config(
+        name             = cfg.prompt_name or "target",
+        target_behaviour = target,
+        weights          = weights,
+    )
+    print(f"[experiment_mjx] Target ({_resolve_target_file(cfg).name}): {target!r}")
+
+    log_path = str(cfg.run_dir / "vlm_responses.jsonl")
+
+    if cfg.use_fake_grader:
+        return LocomotionGrader(
+            api_key           = "",
+            prompt_config     = prompt_cfg,
+            model_name        = cfg.gemini_model,
+            batch_size        = cfg.batching,
+            fake              = True,
+            response_log_path = log_path,
+            debug             = False,
+        )
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from api_keys import APIKEY_GEMINI
-
-    prompt_cfg = get_locomotion_prompt_set(cfg.prompt_name)
     return LocomotionGrader(
         api_key           = APIKEY_GEMINI,
         prompt_config     = prompt_cfg,
         model_name        = cfg.gemini_model,
         batch_size        = cfg.batching,
-        descriptor_config = desc_cfg,
-        response_log_path = str(cfg.run_dir / "vlm_responses.jsonl"),
+        fake              = False,
+        response_log_path = log_path,
         debug             = False,
     )
 
@@ -286,7 +327,11 @@ def _cli():
     parser.add_argument("--n_init_steps",type=int, default=None)
     parser.add_argument("--n_warm_steps",type=int, default=None)
     parser.add_argument("--n_envs_mjx",  type=int, default=None)
-    parser.add_argument("--prompt",      default=None)
+    parser.add_argument("--prompt",      default=None, help="label for this target (GraderOutput.prompt_set)")
+    parser.add_argument("--target-file", dest="target_file", default=None,
+                        help="path to natural-language target.txt (default: package target.txt)")
+    parser.add_argument("--fake-grader", action="store_true",
+                        help="synthetic VLM responses — no network / no API cost")
     parser.add_argument("--seed",        type=int, default=None)
     parser.add_argument("--output_dir",  default=None)
     parser.add_argument("--resume",      default=None, metavar="RUN_DIR")
@@ -309,6 +354,8 @@ def _cli():
     if args.n_warm_steps is not None:  cfg.n_warm_steps = args.n_warm_steps
     if args.n_envs_mjx is not None:    cfg.n_envs_mjx = args.n_envs_mjx
     if args.prompt is not None:        cfg.prompt_name = args.prompt
+    if args.target_file is not None:   cfg.target_file = args.target_file
+    if args.fake_grader:               cfg.use_fake_grader = True
     if args.seed is not None:          cfg.seed = args.seed
     if args.output_dir is not None:    cfg.output_dir = args.output_dir
 

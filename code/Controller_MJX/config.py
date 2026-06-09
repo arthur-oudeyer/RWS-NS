@@ -68,14 +68,14 @@ class ExperimentConfig:
     strategy:      str = "mu_lambda"   # "mu_lambda" | "map_elite"
 
     # ---- Population ---------------------------------------------------------
-    mu:            int = 3
-    lambda_:       int = 7
+    mu:            int = 1
+    lambda_:       int = 3
     sigma:         int = 0          # fresh random individuals injected per gen
     n_generations: int = 2
 
     # init_population_size : number of random individuals trained from scratch
     # at gen 0. mu_lambda → defaults to mu*2; map_elite → max(mu, lambda_)*2.
-    init_population_size: int = 10   # 0 = strategy default
+    init_population_size: int = 3   # 0 = strategy default
 
     # ---- Morphology / Env ----------------------------------------------------
     morphology = "robot" # Morphology, default None -> QUADRIPOD
@@ -118,26 +118,26 @@ class ExperimentConfig:
     # ---- MJX / JAX backend ---------------------------------------------------
     # Number of parallel environments vectorised via jax.vmap.
     # On Mac M2 (Metal) start low (64–128); bump to 512–2048 on a CUDA GPU.
-    n_envs_mjx:   int = 8096
+    n_envs_mjx:   int = 2048
     # JAX backend: "cpu" | "gpu" | "metal"  (set before importing jax)
     jax_backend:  str = "metal"
 
     # ---- PPO inner loop -----------------------------------------------------
-    n_init_steps: int = 50_000_000      # from-scratch training budget (gen 0)
-    n_warm_steps: int = 10_000_000      # warm-start budget for mutated childrenOkay
-    n_envs:       int = 8096
+    n_init_steps: int = 5_000_000      # from-scratch training budget (gen 0)
+    n_warm_steps: int = 2_500_000      # warm-start budget for mutated childrenOkay
+    n_envs:       int = 2048
     policy_arch:  list = field(default_factory=lambda: [256, 256])
     learning_rate:    float = 3e-4
     gamma:            float = 0.99
     gae_lambda:       float = 0.95
     ent_coef:         float = 0.0
     vf_coef:          float = 0.5
-    n_steps_per_env:  int   = 64   # PPO rollout length before each update
+    n_steps_per_env:  int   = 32   # PPO rollout length before each update
     batch_size:       int   = 256
 
     # ---- Env / episode ------------------------------------------------------
     # Episode length used both for PPO rollouts and for the recorded MP4.
-    episode_duration:  float = 5.0   # seconds of simulation per episode
+    episode_duration:  float = 4.0   # seconds of simulation per episode
     control_frequency: int   = 20    # Hz — how often the policy outputs an action
     # MuJoCo timestep is set by the morphology XML (0.019 s); the env applies
     # the same action for `physics_steps_per_action` mj_steps.
@@ -145,7 +145,7 @@ class ExperimentConfig:
     # Action → joint-angle delta scale = prediction_factor / control_frequency.
     # -60 mirrors the CPU mujoco_env.py (≈3 rad/tick at 20 Hz — very fast/nervous).
     # Use a smaller magnitude (e.g. -15) for slower, smoother, more stable motion.
-    prediction_factor: float = -60.0
+    prediction_factor: float = -15.0
 
     # ---- Video / VLM render -------------------------------------------------
     video_fps:           int  = 20
@@ -168,18 +168,37 @@ class ExperimentConfig:
     cam2_elevation:  float = -30.0
     cam2_distance:   float = 4.0
 
-    # ---- Grader -------------------------------------------------------------
-    use_fake_grader = False
-
+    # ---- Grader (VLM only) --------------------------------------------------
+    # The fitness scorer is always the Gemini VLM grader (vlm_grader.py).
     grader_type:    str = "gemini"
     gemini_model:   str = "gemini-3-flash-preview"
-    batching:       int = 10           # videos per Gemini request
-    prompt_name:    str = "walk_forward"
-    descriptor_config_name: str = ""  # "" = no MAP-Elites descriptors
+    batching:       int = 10           # videos per Gemini request (batch size)
 
-    # When True (batch mode only): the current best individual's video is
-    # uploaded as a labelled "reference" alongside every batch.
-    reference_best_in_batch: bool = False
+    # The target behaviour is NOT stored here — it lives in a plain-text file so
+    # it can be edited with `nano`. `target_file` is resolved relative to the
+    # Controller_MJX package directory when not absolute. One line of natural
+    # language, e.g. "a forced and awkward gait" or
+    # "a dance where the arms are lifted to the sky".
+    target_file:    str = "target.txt"
+    # Short label recorded in results for this target (GraderOutput.prompt_set).
+    prompt_name:    str = "target"
+
+    # Fitness = weighted mean of the three VLM dimensions (each on 0..1).
+    vlm_weight_coherence:   float = 1.0
+    vlm_weight_originality: float = 0.5
+    vlm_weight_interest:    float = 1.5
+
+    # When True, the current best individual's video is uploaded as a labelled
+    # "reference" alongside every batch. The reference only exists from
+    # generation 1 onward (gen 0 has no best yet), so this gives exactly the
+    # "build the prompt with the reference video if it's not the first
+    # generation" behaviour.
+    reference_best_in_batch: bool = True
+
+    # Use synthetic VLM responses (no network / no API cost) for wiring tests.
+    use_fake_grader: bool = False
+
+    descriptor_config_name: str = ""  # "" = no MAP-Elites descriptors
 
     # ---- Output -------------------------------------------------------------
     output_dir:            str  = "results"
@@ -263,7 +282,9 @@ class ExperimentConfig:
         print(f"  reward σ     : init={self.reward_init_sigma}  mut={self.reward_mutation_sigma}")
         print(f"  reward defaults : {self.default_reward_weights_dict()}")
         print(f"  video        : {self.render_width}×{self.render_height}  {self.video_fps} fps  track_torso={self.camera_track_torso}")
-        print(f"  grader       : {self.gemini_model}  batch={self.batching}  prompt={self.prompt_name}")
+        print(f"  grader       : {self.gemini_model}  batch={self.batching}  "
+              f"fake={self.use_fake_grader}  reference={self.reference_best_in_batch}")
+        print(f"  target file  : {self.target_file}")
         print(f"  output       : {self.run_dir}  (archive every {self.save_every_n_gen} gen)")
 
 

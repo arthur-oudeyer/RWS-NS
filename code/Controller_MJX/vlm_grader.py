@@ -14,7 +14,7 @@ data_handler.evaluate_batch:
 Unlike PerformanceGrader (which scores a physics quantity from the rollout info
 at render time), the VLM grader scores the *rendered video* itself: it uploads
 each MP4 via the Gemini Files API, sends one batched generate_content call, and
-parses a per-individual JSON of coherence / originality / interest scores into a
+parses a per-individual JSON of coherence / originality / potential scores into a
 fitness ∈ [0, 1]. No `register()` step is needed.
 
 Set fake=True to exercise the whole pipeline with synthetic responses and no
@@ -228,11 +228,11 @@ class LocomotionGrader:
 
         single_schema = (
             "{\n"
-            '      "observation":    "frame-by-frame factual description",\n'
+            '      "observation":    "factual description",\n'
             '      "interpretation": "behavioural interpretation",\n'
             '      "coherence":      { "score": <int 0-100>, "reason": "..." },\n'
             '      "originality":    { "score": <int 0-100>, "reason": "..." },\n'
-            '      "interest":       { "score": <int 0-100>, "reason": "..." }\n'
+            '      "potential":      { "score": <int 0-100>, "reason": "..." }\n'
             "    }"
         )
 
@@ -245,7 +245,7 @@ class LocomotionGrader:
     from the previous generation. It is provided as a contextual baseline ONLY.
     — Do NOT score the reference. Do NOT include "reference" as a key in your JSON output.
     Use the reference to better identify and reward genuine behavioural novelty and real
-    improvement over it.
+    improvement over it. The reference is not a "good" solution, just a point of comparison that can be outperformed.
     """
 
         return f"""
@@ -294,24 +294,24 @@ class LocomotionGrader:
 
         coherence   = _score("coherence")
         originality = _score("originality")
-        interest    = _score("interest")
+        potential    = _score("potential")
 
         w = self._prompt_config.weights
-        total_w = w.coherence + w.originality + w.interest
+        total_w = w.coherence + w.originality + w.potential
         fitness = round(
-            (w.coherence * coherence + w.originality * originality + w.interest * interest)
+            (w.coherence * coherence + w.originality * originality + w.potential * potential)
             / total_w, 6)
 
         if dbg:
             print(f"  coherence={coherence:.2f}  originality={originality:.2f}  "
-                  f"interest={interest:.2f}  → fitness={fitness:.4f}")
+                  f"potential={potential:.2f}  → fitness={fitness:.4f}")
 
         return GraderOutput(
             fitness    = fitness,
             raw_scores = {
                 "coherence":   round(coherence, 4),
                 "originality": round(originality, 4),
-                "interest":    round(interest, 4),
+                "potential":    round(potential, 4),
             },
             method     = "fake" if self._fake else "gemini_video_batch",
             prompt_set = self._prompt_config.name,
@@ -320,7 +320,7 @@ class LocomotionGrader:
                 "interpretation":    parsed.get("interpretation", ""),
                 "coherence_reason":  _reason("coherence"),
                 "originality_reason":_reason("originality"),
-                "interest_reason":   _reason("interest"),
+                "potential_reason":   _reason("potential"),
                 "vlm_descriptors":   {},   # MAP-Elites descriptors not wired yet
             },
         )
