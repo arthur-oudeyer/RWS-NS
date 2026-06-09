@@ -164,15 +164,32 @@ class LocomotionGrader:
             else:
                 text = self._score_chunk_remote(chunk, ids, reference_video, dbg)
 
-            parsed = self._parse_json(text)
+            # A malformed batch response must NOT abort the whole experiment
+            # (a run can be hours of GPU time). Degrade to fitness 0.0 for the
+            # affected individuals; the raw response is already logged.
+            try:
+                parsed = self._parse_json(text)
+            except Exception as e:
+                print(f"[vlm_grader] WARNING: could not parse batch response "
+                      f"({e}); assigning fitness 0.0 to {ids}. Raw logged.", flush=True)
+                for vid in ids:
+                    results[vid] = self._fallback_output(f"parse_error: {e}")
+                continue
+
             parsed.pop("reference", None)
             for vid in ids:
-                if vid not in parsed:
-                    raise ValueError(
-                        f"[vlm_grader] missing individual id '{vid}' in response.\n"
-                        f"Available keys: {list(parsed.keys())}"
-                    )
-                results[vid] = self._build_grader_output(parsed[vid], dbg)
+                entry = parsed.get(vid)
+                if entry is None:
+                    print(f"[vlm_grader] WARNING: id '{vid}' missing from response "
+                          f"(keys: {list(parsed.keys())}); fitness 0.0.", flush=True)
+                    results[vid] = self._fallback_output("missing_in_response")
+                    continue
+                try:
+                    results[vid] = self._build_grader_output(entry, dbg)
+                except Exception as e:
+                    print(f"[vlm_grader] WARNING: could not score '{vid}' "
+                          f"({e}); fitness 0.0.", flush=True)
+                    results[vid] = self._fallback_output(f"score_error: {e}")
 
         return results
 
@@ -274,7 +291,21 @@ class LocomotionGrader:
         end   = stripped.rfind("}") + 1
         if start == -1 or end == 0:
             raise ValueError(f"[vlm_grader] no JSON in response.\nRaw:\n{text}")
-        return json.loads(stripped[start:end])
+        # strict=False tolerates raw control characters (unescaped newlines /
+        # tabs) that Gemini sometimes emits inside string values — these would
+        # otherwise raise "Invalid control character" and crash the whole run.
+        return json.loads(stripped[start:end], strict=False)
+
+    def _fallback_output(self, note: str) -> "GraderOutput":
+        """Neutral result for an individual whose VLM response could not be
+        parsed/scored — keeps a long run alive instead of crashing it."""
+        return GraderOutput(
+            fitness    = 0.0,
+            raw_scores = {"coherence": 0.0, "originality": 0.0, "potential": 0.0},
+            method     = ("fake" if self._fake else "gemini_video_batch") + "_failed",
+            prompt_set = self._prompt_config.name,
+            extra      = {"error": note, "vlm_descriptors": {}},
+        )
 
     def _build_grader_output(self, parsed: dict, dbg: bool) -> GraderOutput:
         def _score(key: str) -> float:
