@@ -186,7 +186,7 @@ class ExperimentConfig:
     # Fitness = weighted mean of the three VLM dimensions (each on 0..1).
     vlm_weight_coherence:   float = 1.0
     vlm_weight_originality: float = 0.5
-    vlm_weight_interest:    float = 1.5
+    vlm_weight_potential:    float = 1.5
 
     # When True, the current best individual's video is uploaded as a labelled
     # "reference" alongside every batch. The reference only exists from

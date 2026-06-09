@@ -61,7 +61,7 @@ class ControllerResult:
     n_train_steps  : PPO timesteps spent on this individual
                      (n_init_steps for from-scratch, n_warm_steps otherwise).
     fitness        : scalar in [0, 1] from the VLM. Drives selection.
-    raw_scores     : per-dimension VLM scores (coherence, progress, interest …).
+    raw_scores     : per-dimension VLM scores (coherence, originality, potential …).
     descriptors    : MAP-Elites descriptors (VLM-returned + structural).
     grader_method  : "gemini_video" | "gemini_video_batch" | "fake".
     prompt_set     : name of the LocomotionPromptConfig.
@@ -215,7 +215,7 @@ if __name__ == "__main__":
         video_path     = "/tmp/rollout.mp4",
         n_train_steps  = 50_000,
         fitness        = 0.42,
-        raw_scores     = {"coherence": 0.5, "progress": 0.4, "interest": 0.3},
+        raw_scores     = {"coherence": 0.5, "progress": 0.4, "potential": 0.3},
         descriptors    = {},
         grader_method  = "fake",
         prompt_set     = "walk_forward",
@@ -230,7 +230,7 @@ if __name__ == "__main__":
     class _FakeOut:
         def __init__(self, fit, robot_id):
             self.fitness = fit
-            self.raw_scores = {"coherence": fit, "progress": fit, "interest": fit}
+            self.raw_scores = {"coherence": fit, "progress": fit, "potential": fit}
             self.method = "fake"
             self.prompt_set = "fake"
             self.extra = {"vlm_descriptors": {"limb_count": 4}}

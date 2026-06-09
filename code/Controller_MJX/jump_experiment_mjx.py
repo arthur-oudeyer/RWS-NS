@@ -347,7 +347,7 @@ def _build_grader(args, target: Target, run_dir: Path):
     performance : deterministic physics metric (PerformanceGrader) — fitness is
                   the target's metric, in physical units.
     vlm         : Gemini scores the rendered video (vlm_grader.LocomotionGrader)
-                  — fitness ∈ [0,1] from coherence/originality/interest.
+                  — fitness ∈ [0,1] from coherence/originality/potential.
     """
     if args.grader == "performance":
         grader = PerformanceGrader(metric_fn=target.metric_fn,

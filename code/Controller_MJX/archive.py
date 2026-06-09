@@ -360,7 +360,7 @@ if __name__ == "__main__":
             video_path     = f"/tmp/v{i}.mp4",
             n_train_steps  = 50_000 if parent is None else 15_000,
             fitness        = fit,
-            raw_scores     = {"coherence": fit, "progress": fit, "interest": fit},
+            raw_scores     = {"coherence": fit, "progress": fit, "potential": fit},
             descriptors    = descriptors or {"gait": (i % 3), "speed": (i % 2)},
             grader_method  = "fake",
             prompt_set     = "fake",

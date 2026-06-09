@@ -77,7 +77,7 @@ def _make_grader(cfg: ExperimentConfig):
     weights = LocomotionScoringWeights(
         coherence   = cfg.vlm_weight_coherence,
         originality = cfg.vlm_weight_originality,
-        interest    = cfg.vlm_weight_interest,
+        potential    = cfg.vlm_weight_potential,
     )
     prompt_cfg = make_prompt_config(
         name             = cfg.prompt_name or "target",
