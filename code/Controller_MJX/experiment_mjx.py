@@ -23,9 +23,62 @@ Usage
 
 from __future__ import annotations
 
+import os
+import sys
+
+# Headless EGL rendering + XLA GPU flags — must precede the JAX/mujoco imports.
+os.environ.setdefault("MUJOCO_GL", "egl")
+os.environ.setdefault("XLA_FLAGS",
+    "--xla_gpu_enable_cublaslt=true --xla_gpu_autotune_level=4")
+os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.92")
+
+
+# ---------------------------------------------------------------------------
+# Single-GPU pinning — MUST run before JAX is imported (evolution_mjx pulls it).
+# ---------------------------------------------------------------------------
+# JAX otherwise initialises on EVERY visible GPU and preallocates
+# MEM_FRACTION × VRAM on each — which on this shared machine OOMs against GPU 0
+# (used by other people). We pin to exactly one GPU. Precedence:
+#   1. An explicit CUDA_VISIBLE_DEVICES already in the environment (respected).
+#   2. `--gpu N` on the command line.
+#   3. Auto-pick the GPU with the most free memory, EXCLUDING GPU 0.
+
+def _pin_single_gpu(exclude=(0,)) -> None:
+    if os.environ.get("CUDA_VISIBLE_DEVICES"):
+        print(f"[gpu] using CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']} (from env)")
+        return
+    if "--gpu" in sys.argv:
+        i = sys.argv.index("--gpu")
+        if i + 1 < len(sys.argv):
+            os.environ["CUDA_VISIBLE_DEVICES"] = sys.argv[i + 1]
+            print(f"[gpu] using GPU {sys.argv[i + 1]} (from --gpu)")
+            return
+    import subprocess
+    try:
+        out = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=index,memory.free",
+             "--format=csv,noheader,nounits"], text=True)
+        cands = []
+        for line in out.strip().splitlines():
+            idx, free = (x.strip() for x in line.split(","))
+            idx, free = int(idx), int(free)
+            if idx in exclude:
+                continue
+            cands.append((free, idx))
+        if cands:
+            free, idx = max(cands)
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(idx)
+            print(f"[gpu] auto-selected GPU {idx} ({free} MiB free; excluded {list(exclude)})")
+            return
+        print(f"[gpu] no eligible GPU outside {list(exclude)} — falling back to JAX default")
+    except Exception as e:
+        print(f"[gpu] auto-select failed ({e}); using JAX default")
+
+
+_pin_single_gpu(exclude=(0,))
+
 import argparse
 import json
-import sys
 import time
 from pathlib import Path
 from typing import Optional, Union
@@ -335,6 +388,8 @@ def _cli():
     parser.add_argument("--seed",        type=int, default=None)
     parser.add_argument("--output_dir",  default=None)
     parser.add_argument("--resume",      default=None, metavar="RUN_DIR")
+    parser.add_argument("--gpu",         default=None,
+                        help="pin to this GPU index (already applied at import; here for --help)")
     parser.add_argument("--debug",       action="store_true")
     args = parser.parse_args()
 
