@@ -415,7 +415,7 @@ class MuLambdaEvolutionMJX(BaseEvolutionMJX):
     """(μ+λ) evolution using MJX training and rendering."""
 
     def initialise(self, grader, id_counter: int = 0):
-        size     = self.cfg.init_population_size or self.cfg.mu * 2
+        size     = self.cfg.init_population_size if self.cfg.init_population_size != 0 else (self.cfg.mu * 3)
         defaults = self.cfg.default_reward_weights_dict()
 
         specs: list[_IndividualSpec] = []

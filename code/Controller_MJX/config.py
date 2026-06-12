@@ -74,8 +74,8 @@ class ExperimentConfig:
     n_generations: int = 2
 
     # init_population_size : number of random individuals trained from scratch
-    # at gen 0. mu_lambda → defaults to mu*2; map_elite → max(mu, lambda_)*2.
-    init_population_size: int = 3   # 0 = strategy default
+    # at gen 0. mu_lambda → defaults to mu*3; map_elite → max(mu, lambda_)*2.
+    init_population_size: int = 0   # 0 = strategy default
 
     # ---- Morphology / Env ----------------------------------------------------
     morphology = "robot" # Morphology, default None -> QUADRIPOD
