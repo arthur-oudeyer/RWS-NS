@@ -65,6 +65,7 @@ from mujoco_env_mjx import (
     EnvState,
     build_env_config,
     make_env_fns,
+    make_single_env_fns_rw,
     _pick_mjx_device,
 )
 from ppo_trainer_mjx import ActorCritic, init_actor_critic
@@ -108,6 +109,42 @@ def build_policy_fn(
             return jnp.clip(action, -1.0, 1.0)
 
     return _policy
+
+
+def make_reusable_render_fns(
+    cfg:           MJXEnvConfig,
+    policy_arch:   tuple = (256, 256),
+    deterministic: bool  = True,
+) -> Tuple[Callable, Callable, Callable]:
+    """
+    Build render functions ONCE for reuse across every individual.
+
+    Returns (policy_apply, reset_fn, step_rw_fn) where ``params`` and ``rw_vec``
+    are RUNTIME arguments — so the XLA executables are compiled a single time
+    and reused, instead of one fresh (never-freed) compile per individual which
+    leaks VRAM and eventually OOMs the render after a few individuals.
+
+        policy_apply(params, obs)         → action  (deterministic mean, clipped)
+        reset_fn(rng_key)                 → (EnvState, obs)
+        step_rw_fn(state, action, rw_vec) → (EnvState, obs, reward, done)
+    """
+    net = ActorCritic(obs_dim=cfg.obs_dim, act_dim=cfg.n_joints, hidden=tuple(policy_arch))
+
+    if deterministic:
+        @jax.jit
+        def policy_apply(params: Any, obs: Any) -> Any:
+            mean, _log_std, _value = net.apply(params, obs)
+            return jnp.clip(mean, -1.0, 1.0)
+    else:
+        @jax.jit
+        def policy_apply(params: Any, obs: Any) -> Any:
+            key = jax.random.PRNGKey(0)
+            mean, log_std, _value = net.apply(params, obs)
+            std = jnp.exp(log_std)
+            return jnp.clip(mean + std * jax.random.normal(key, mean.shape), -1.0, 1.0)
+
+    reset_fn, step_rw_fn = make_single_env_fns_rw(cfg)
+    return policy_apply, reset_fn, step_rw_fn
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +255,13 @@ def rollout_to_video_mjx(
     seed:               int  = 0,
     policy_arch:        tuple = (256, 256),
     max_steps:          Optional[int] = None,
+    # Reusable, compile-once functions (params/rw_vec passed at runtime). When
+    # all three are supplied no per-call JIT compilation happens — this is how
+    # the evolution loop avoids the per-individual VRAM leak. Standalone callers
+    # can omit them and the functions are built locally (back-compat).
+    policy_apply:       Optional[Callable] = None,
+    reset_fn:           Optional[Callable] = None,
+    step_rw_fn:         Optional[Callable] = None,
 ) -> Tuple[str, dict]:
     """
     Roll out the Flax policy for one episode and write an MP4.
@@ -259,16 +303,23 @@ def rollout_to_video_mjx(
 
     cap = max_steps if max_steps is not None else cfg.max_steps
 
-    # ---- Build policy fn ---------------------------------------------------
-    net = ActorCritic(
-        obs_dim=cfg.obs_dim,
-        act_dim=cfg.n_joints,
-        hidden=tuple(policy_arch),
-    )
-    policy_fn = build_policy_fn(params, net, deterministic=deterministic)
-
-    # ---- Build single-env JAX fns ------------------------------------------
-    reset_fn, step_fn, _ = make_env_fns(cfg)
+    # ---- Build / reuse JAX fns ---------------------------------------------
+    # Prefer the compile-once functions when supplied (params/rw_vec at runtime).
+    # Otherwise build them locally — same kernels, but recompiled per call.
+    reuse = policy_apply is not None and reset_fn is not None and step_rw_fn is not None
+    rw_vec = cfg.reward_weights_vec
+    if reuse:
+        policy_fn = lambda obs: policy_apply(params, obs)
+        step_fn   = lambda state, action: step_rw_fn(state, action, rw_vec)
+    else:
+        net = ActorCritic(
+            obs_dim=cfg.obs_dim,
+            act_dim=cfg.n_joints,
+            hidden=tuple(policy_arch),
+        )
+        policy_fn = build_policy_fn(params, net, deterministic=deterministic)
+        reset_fn, _step_fn, _ = make_env_fns(cfg)
+        step_fn = lambda state, action: _step_fn(state, action)
 
     # ---- Build renderers (CPU, not JAX) ------------------------------------
     renderer1 = mujoco.Renderer(mj_model, height=render_height, width=render_width)

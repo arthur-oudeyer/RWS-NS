@@ -86,6 +86,7 @@ class LocomotionGrader:
         fake:                bool = False,
         response_log_path:   Optional[str] = None,
         upload_poll_seconds: float = 1.0,
+        n_score_request:     int = 1,
         debug:               bool = False,
     ):
         self._prompt_config     = prompt_config
@@ -94,6 +95,7 @@ class LocomotionGrader:
         self._fake              = fake
         self._response_log_path = response_log_path
         self._upload_poll       = upload_poll_seconds
+        self._n_score_request   = max(1, n_score_request)
         self.debug              = debug
 
         if not fake:
@@ -158,40 +160,114 @@ class LocomotionGrader:
             chunk = videos[start : start + self._batch_size]
             ids   = [vid for vid, _ in chunk]
 
-            if self._fake:
-                text = generate_fake_vlm_batch_response(ids)
-                self._log_response("batch", ids, text)
-            else:
-                text = self._score_chunk_remote(chunk, ids, reference_video, dbg)
+            # The VLM score is noisy: score the same batch n_score_request times
+            # and average the per-dimension scores to cut variance. Each request
+            # is fully independent (re-uploads + fresh generate_content) so the
+            # samples are uncorrelated.
+            per_request: "list[dict[str, GraderOutput]]" = []
+            for attempt in range(self._n_score_request):
+                if self._n_score_request > 1 and dbg:
+                    print(f"  [vlm_grader] scoring attempt {attempt+1}/{self._n_score_request} "
+                          f"for {ids}", flush=True)
+                per_request.append(
+                    self._score_chunk_once(chunk, ids, reference_video, dbg)
+                )
 
-            # A malformed batch response must NOT abort the whole experiment
-            # (a run can be hours of GPU time). Degrade to fitness 0.0 for the
-            # affected individuals; the raw response is already logged.
-            try:
-                parsed = self._parse_json(text)
-            except Exception as e:
-                print(f"[vlm_grader] WARNING: could not parse batch response "
-                      f"({e}); assigning fitness 0.0 to {ids}. Raw logged.", flush=True)
-                for vid in ids:
-                    results[vid] = self._fallback_output(f"parse_error: {e}")
-                continue
-
-            parsed.pop("reference", None)
             for vid in ids:
-                entry = parsed.get(vid)
-                if entry is None:
-                    print(f"[vlm_grader] WARNING: id '{vid}' missing from response "
-                          f"(keys: {list(parsed.keys())}); fitness 0.0.", flush=True)
-                    results[vid] = self._fallback_output("missing_in_response")
-                    continue
-                try:
-                    results[vid] = self._build_grader_output(entry, dbg)
-                except Exception as e:
-                    print(f"[vlm_grader] WARNING: could not score '{vid}' "
-                          f"({e}); fitness 0.0.", flush=True)
-                    results[vid] = self._fallback_output(f"score_error: {e}")
+                results[vid] = self._average_outputs(
+                    [r[vid] for r in per_request], vid
+                )
 
         return results
+
+    def _score_chunk_once(
+        self, chunk, ids, reference_video, dbg
+    ) -> "dict[str, GraderOutput]":
+        """One scoring request for a chunk → {id: GraderOutput}.
+
+        Resilient: a malformed batch response must NOT abort the whole
+        experiment (a run can be hours of GPU time). Affected individuals
+        degrade to fitness 0.0; the raw response is already logged.
+        """
+        out: dict[str, GraderOutput] = {}
+
+        if self._fake:
+            text = generate_fake_vlm_batch_response(ids)
+            self._log_response("batch", ids, text)
+        else:
+            text = self._score_chunk_remote(chunk, ids, reference_video, dbg)
+
+        try:
+            parsed = self._parse_json(text)
+        except Exception as e:
+            print(f"[vlm_grader] WARNING: could not parse batch response "
+                  f"({e}); assigning fitness 0.0 to {ids}. Raw logged.", flush=True)
+            for vid in ids:
+                out[vid] = self._fallback_output(f"parse_error: {e}")
+            return out
+
+        parsed.pop("reference", None)
+        for vid in ids:
+            entry = parsed.get(vid)
+            if entry is None:
+                print(f"[vlm_grader] WARNING: id '{vid}' missing from response "
+                      f"(keys: {list(parsed.keys())}); fitness 0.0.", flush=True)
+                out[vid] = self._fallback_output("missing_in_response")
+                continue
+            try:
+                out[vid] = self._build_grader_output(entry, dbg)
+            except Exception as e:
+                print(f"[vlm_grader] WARNING: could not score '{vid}' "
+                      f"({e}); fitness 0.0.", flush=True)
+                out[vid] = self._fallback_output(f"score_error: {e}")
+        return out
+
+    def _average_outputs(
+        self, outputs: "list[GraderOutput]", vid: str
+    ) -> "GraderOutput":
+        """Average the per-dimension scores across repeated scoring requests.
+
+        Only successful requests (not the fitness-0.0 fallbacks) are averaged.
+        Reasons/observations are taken from the first successful request. If
+        every request failed, a single fallback is returned.
+        """
+        if len(outputs) == 1:
+            return outputs[0]
+
+        good = [o for o in outputs if not o.method.endswith("_failed")]
+        if not good:
+            return outputs[0]   # all failed → keep the (fallback) output
+
+        keys  = ("coherence", "originality", "potential")
+        means = {k: sum(o.raw_scores.get(k, 0.0) for o in good) / len(good) for k in keys}
+
+        w = self._prompt_config.weights
+        total_w = w.coherence + w.originality + w.potential
+        fitness = round(
+            (w.coherence * means["coherence"]
+             + w.originality * means["originality"]
+             + w.potential * means["potential"]) / total_w, 6)
+
+        fitness_samples = [o.fitness for o in good]
+        n = len(fitness_samples)
+        mean_fit = sum(fitness_samples) / n
+        std_fit = (sum((f - mean_fit) ** 2 for f in fitness_samples) / n) ** 0.5
+
+        base = dict(good[0].extra)
+        base.update({
+            "n_score_request":  self._n_score_request,
+            "n_scored_ok":      len(good),
+            "fitness_samples":  [round(f, 4) for f in fitness_samples],
+            "fitness_std":      round(std_fit, 4),
+        })
+
+        return GraderOutput(
+            fitness    = fitness,
+            raw_scores = {k: round(means[k], 4) for k in keys},
+            method     = good[0].method + f"_mean{len(good)}",
+            prompt_set = good[0].prompt_set,
+            extra      = base,
+        )
 
     def _score_chunk_remote(self, chunk, ids, reference_video, dbg) -> str:
         uploaded = []

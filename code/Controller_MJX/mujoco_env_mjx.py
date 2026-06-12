@@ -816,6 +816,123 @@ def make_reward_agnostic_batch_fns(
 
 
 # ---------------------------------------------------------------------------
+# Single-env render functions (rw_vec as runtime arg — compile ONCE, reuse for
+# every individual). The render path used to call make_env_fns(cfg) per
+# individual, which baked rw_vec into the JIT closure and produced a fresh
+# (never-freed) XLA executable each time → VRAM leak → OOM after a few
+# individuals. Here rw_vec is an explicit argument so the kernel is reused.
+# ---------------------------------------------------------------------------
+
+def make_single_env_fns_rw(
+    cfg: MJXEnvConfig,
+) -> Tuple[Any, Any]:
+    """
+    Return single-env JIT functions where reward_weights_vec is a RUNTIME arg.
+
+    Returns
+    -------
+    reset_fn(rng_key)               → (EnvState, obs)
+    step_rw_fn(state, action, rw_vec) → (EnvState, obs, reward, done)
+
+    The morphology (mjx_model, base_data, …) is fixed for an evolution run, so
+    these compile once and are reused for every individual regardless of its
+    evolved reward weights.
+    """
+    _require_mjx()
+
+    mx          = cfg.mjx_model
+    base_dx     = cfg.base_data
+    foot_gids   = cfg.foot_geom_ids
+    rest_angles = cfg.rest_angles
+    cl_init     = cfg.ctrl_low_init
+    ch_init     = cfg.ctrl_high_init
+    ctrl_low    = cfg.ctrl_low
+    ctrl_high   = cfg.ctrl_high
+    c2q         = cfg.ctrl_to_qpos
+
+    n_joints    = cfg.n_joints
+    n_feet      = cfg.n_feet
+    spawn_h     = jnp.float32(cfg.spawn_height)
+    n_substeps  = cfg.physics_steps_per_action
+    max_steps_  = cfg.max_steps
+    fall_h      = jnp.float32(cfg.fall_height)
+    dscale      = jnp.float32(cfg.delta_scale)
+    timestep_   = jnp.float32(cfg.timestep)
+
+    def _reset(rng_key: Any) -> Tuple[EnvState, Any]:
+        key, subkey = jax.random.split(rng_key)
+        jitter = jax.random.uniform(
+            subkey, (n_joints,), minval=-0.05, maxval=0.05, dtype=jnp.float32
+        )
+        init_joints = jnp.clip(rest_angles + jitter, cl_init, ch_init)
+        qpos = base_dx.qpos.at[2].set(spawn_h)
+        qpos = qpos.at[7 : 7 + n_joints].set(init_joints)
+        data = base_dx.replace(qpos=qpos)
+        data = mjx.forward(mx, data)
+        state = EnvState(
+            data              = data,
+            step_idx          = jnp.int32(0),
+            sim_time          = jnp.float32(0.0),
+            prev_action       = jnp.zeros(n_joints, jnp.float32),
+            initial_torso_pos = data.qpos[0:3].astype(jnp.float32),
+            fell              = jnp.bool_(False),
+        )
+        return state, _build_obs(state, n_joints)
+
+    def _step_rw(
+        state:  EnvState,
+        action: Any,
+        rw_vec: Any,
+    ) -> Tuple[EnvState, Any, Any, Any]:
+        action = jnp.clip(action.astype(jnp.float32), jnp.float32(-1.0), jnp.float32(1.0))
+        sensors_pre = _read_sensors(state.data, n_joints, n_feet, foot_gids)
+        target_qpos = sensors_pre.hip_angles + dscale * action
+        target_ctrl = jnp.clip(target_qpos[c2q], ctrl_low, ctrl_high)
+        data        = state.data.replace(ctrl=target_ctrl)
+
+        def _substep(d, _):
+            return mjx.step(mx, d), None
+        data, _ = jax.lax.scan(_substep, data, None, length=n_substeps)
+
+        new_sim_time = state.sim_time + timestep_ * jnp.float32(n_substeps)
+        new_step_idx = state.step_idx + jnp.int32(1)
+        sensors      = _read_sensors(data, n_joints, n_feet, foot_gids)
+
+        blew_up         = ~(jnp.all(jnp.isfinite(data.qpos))
+                            & jnp.all(jnp.isfinite(data.qvel)))
+        fell_now        = ((sensors.torso_height < fall_h)
+                           | (sensors_pre.torso_height < fall_h) | blew_up)
+        fell_transition = fell_now & ~state.fell
+        fell            = state.fell | fell_now
+
+        reward = compute_step_reward_jax(
+            rw_vec, sensors, action, state.prev_action,
+            fell_transition, state.initial_torso_pos,
+        )
+        reward = jnp.clip(
+            jnp.nan_to_num(reward, nan=0.0, posinf=_REWARD_CLIP, neginf=-_REWARD_CLIP),
+            -_REWARD_CLIP, _REWARD_CLIP,
+        )
+        terminated = fell
+        truncated  = new_step_idx >= jnp.int32(max_steps_)
+        done       = terminated | truncated
+
+        new_state = EnvState(
+            data              = data,
+            step_idx          = new_step_idx,
+            sim_time          = new_sim_time,
+            prev_action       = action,
+            initial_torso_pos = state.initial_torso_pos,
+            fell              = fell,
+        )
+        obs = jnp.nan_to_num(_build_obs(new_state, n_joints), nan=0.0,
+                             posinf=_OBS_CLIP, neginf=-_OBS_CLIP)
+        return new_state, obs, reward, done
+
+    return jax.jit(_reset), jax.jit(_step_rw)
+
+
+# ---------------------------------------------------------------------------
 # Debug / smoke test
 # ---------------------------------------------------------------------------
 

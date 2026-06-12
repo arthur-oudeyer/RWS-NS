@@ -178,6 +178,10 @@ class ExperimentConfig:
     grader_type:    str = "gemini"
     gemini_model:   str = "gemini-3-flash-preview"
     batching:       int = 10           # videos per Gemini request (batch size)
+    # The VLM score has high variance between identical requests. Scoring each
+    # batch n_score_request times and averaging the per-dimension scores gives
+    # a more consistent fitness. 1 = single request (no averaging).
+    n_score_request: int = 3
 
     # The target behaviour is NOT stored here — it lives in a plain-text file so
     # it can be edited with `nano`. `target_file` is resolved relative to the
@@ -288,6 +292,7 @@ class ExperimentConfig:
         print(f"  reward defaults : {self.default_reward_weights_dict()}")
         print(f"  video        : {self.render_width}×{self.render_height}  {self.video_fps} fps  track_torso={self.camera_track_torso}")
         print(f"  grader       : {self.gemini_model}  batch={self.batching}  "
+              f"n_score_request={self.n_score_request}  "
               f"fake={self.use_fake_grader}  reference={self.reference_best_in_batch}")
         print(f"  target file  : {self.target_file}")
         print(f"  output       : {self.run_dir}  (archive every {self.save_every_n_gen} gen)")

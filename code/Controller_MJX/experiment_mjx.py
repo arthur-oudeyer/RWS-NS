@@ -92,6 +92,68 @@ from data_handler  import ControllerResult, result_to_dict
 
 
 # ---------------------------------------------------------------------------
+# Full terminal logging  (everything printed → run_dir/log.txt)
+# ---------------------------------------------------------------------------
+
+class _Tee:
+    """Mirror writes to the original stream AND a log file, flushing each write.
+
+    Flushing every write keeps log.txt complete even if the process crashes
+    mid-run, so the whole history can be retraced. Carriage-return progress
+    lines (printed with end="" + leading "\\r") are written to the file as
+    newlines so each update becomes its own readable line in the log.
+    """
+
+    def __init__(self, stream, file_handle):
+        self._stream = stream
+        self._file   = file_handle
+
+    def write(self, data):
+        self._stream.write(data)
+        self._stream.flush()
+        self._file.write(data.replace("\r", "\n") if "\r" in data else data)
+        self._file.flush()
+        return len(data)
+
+    def flush(self):
+        self._stream.flush()
+        self._file.flush()
+
+    def isatty(self):
+        return getattr(self._stream, "isatty", lambda: False)()
+
+    def fileno(self):
+        return self._stream.fileno()
+
+
+class _capture_terminal:
+    """Context manager: tee stdout+stderr into ``path`` for the whole run."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = open(self.path, "a", buffering=1, encoding="utf-8")
+        self._fh.write(f"\n{'=' * 70}\n[log started {time.strftime('%Y-%m-%d %H:%M:%S')}]\n{'=' * 70}\n")
+        self._fh.flush()
+        self._old_out, self._old_err = sys.stdout, sys.stderr
+        sys.stdout = _Tee(self._old_out, self._fh)
+        sys.stderr = _Tee(self._old_err, self._fh)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc is not None:
+            import traceback
+            self._fh.write("\n[UNCAUGHT EXCEPTION]\n")
+            traceback.print_exception(exc_type, exc, tb, file=self._fh)
+            self._fh.flush()
+        sys.stdout, sys.stderr = self._old_out, self._old_err
+        self._fh.close()
+        return False   # never swallow the exception
+
+
+# ---------------------------------------------------------------------------
 # Archive / grader factories (identical to experiment.py)
 # ---------------------------------------------------------------------------
 
@@ -149,6 +211,7 @@ def _make_grader(cfg: ExperimentConfig):
             batch_size        = cfg.batching,
             fake              = True,
             response_log_path = log_path,
+            n_score_request   = cfg.n_score_request,
             debug             = False,
         )
 
@@ -161,6 +224,7 @@ def _make_grader(cfg: ExperimentConfig):
         batch_size        = cfg.batching,
         fake              = False,
         response_log_path = log_path,
+        n_score_request   = cfg.n_score_request,
         debug             = False,
     )
 
@@ -399,7 +463,8 @@ def _cli():
         return _debug_smoke()
 
     if args.resume:
-        resume_mjx(args.resume)
+        with _capture_terminal(Path(args.resume) / "log.txt"):
+            resume_mjx(args.resume)
         return
 
     cfg = ExperimentConfig()
@@ -416,7 +481,8 @@ def _cli():
     if args.seed is not None:          cfg.seed = args.seed
     if args.output_dir is not None:    cfg.output_dir = args.output_dir
 
-    run_mjx(cfg)
+    with _capture_terminal(cfg.run_dir / "log.txt"):
+        run_mjx(cfg)
 
 
 # ---------------------------------------------------------------------------

@@ -64,7 +64,7 @@ from ppo_trainer_mjx  import (
     PPOConfig,
     make_train_step_fn,
 )
-from video_renderer_mjx import rollout_to_video_mjx
+from video_renderer_mjx import rollout_to_video_mjx, make_reusable_render_fns
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +339,21 @@ class BaseEvolutionMJX(ABC):
         save_params(params, path)
         return path, params, fitness
 
+    def _render_fns(self):
+        """Build the compile-once render functions lazily and cache them.
+
+        params/rw_vec are runtime arguments, so the same XLA executables serve
+        every individual — avoiding the per-individual recompile that leaked
+        VRAM and OOM'd the render after a few individuals.
+        """
+        if getattr(self, "_render_fns_cache", None) is None:
+            self._render_fns_cache = make_reusable_render_fns(
+                self._template_cfg,
+                policy_arch   = tuple(self.cfg.policy_arch),
+                deterministic = True,
+            )
+        return self._render_fns_cache
+
     def _render(
         self,
         params:       Any,
@@ -349,6 +364,7 @@ class BaseEvolutionMJX(ABC):
     ) -> str:
         env_cfg = self._env_cfg_for(rw)
         mp4     = _video_path(self.run_dir, individual_id, generation)
+        policy_apply, reset_fn, step_rw_fn = self._render_fns()
         rollout_to_video_mjx(
             params        = params,
             cfg           = env_cfg,
@@ -368,6 +384,9 @@ class BaseEvolutionMJX(ABC):
             seed          = seed,
             policy_arch   = tuple(self.cfg.policy_arch),
             deterministic = True,
+            policy_apply  = policy_apply,
+            reset_fn      = reset_fn,
+            step_rw_fn    = step_rw_fn,
         )
         return mp4
 
