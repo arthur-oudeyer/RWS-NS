@@ -34,6 +34,7 @@ from gemini_prompts import (
     OUTPUT_MARKER,
     get_fake_answer,
     generate_fake_vlm_batch_response,
+    get_reference_section
 )
 
 try:
@@ -331,15 +332,7 @@ class LocomotionGrader:
 
         reference_section = ""
         if has_reference:
-            reference_section = """
-    ═══ REFERENCE VIDEO ═══
-
-    The first video labeled "reference" shows the CURRENT BEST-PERFORMING controller
-    from the previous generation. It is provided as a contextual baseline ONLY.
-    — Do NOT score the reference. Do NOT include "reference" as a key in your JSON output.
-    Use the reference to better identify and reward genuine behavioural novelty and real
-    improvement over it. The reference is not a "good" solution, just a point of comparison that can be outperformed.
-    """
+            reference_section = get_reference_section()
 
         return f"""
     ═══ BATCH EVALUATION ═══
@@ -347,7 +340,9 @@ class LocomotionGrader:
     You will evaluate {len(ids)} robot rollout videos in one pass.
     Each video was labeled before being sent: {id_list}.
     Evaluate each one independently.
+    
     {reference_section}
+    
     {body}
 
     ═══ OUTPUT FORMAT ═══

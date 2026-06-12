@@ -79,7 +79,7 @@ def build_locomotion_prompt(target_behaviour: str) -> str:
     return f"""
     ═══ CONTEXT ═══
 
-    You are looking at video of a short simulation showing two side-by-side view of a simulated robot composed of a white torso and colored legs. It stands on a green checkered floor, and the background is blue.
+    You are looking at video of a short simulation showing two side-by-side view of a simulated robot composed of a white torso, 3 colored legs (red, orange, pink), one blue neck and a small green head. The joint are the yellow balls. It stands on a green checkered floor, and the background is blue.
 
     Target behavior : {target_behaviour}
 
@@ -90,17 +90,17 @@ def build_locomotion_prompt(target_behaviour: str) -> str:
     
     Step 2 — Behavioural interpretation
     - Did the robot make consistent actions relevant to the target behaviour ?
-    - Was the gait coherent (periodic, balanced, repeatable) or random ? What type of gait (smooth, energetic, nervous, wide, brutal, efficient, small, homogeneous, ...) ?
-    - Is there anything novel or interesting about the motion pattern even if the robot did not perform well for the target behaviour ? (e.g. is a limb doing a movement with great potential ?)
+    - Was the gait coherent (periodic / balanced / repeatable) or random ? What type of gait (smooth, energetic, nervous, wide, brutal, efficient, small, homogeneous, ...) ?
+    - Is there anything novel / original / interesting about the motion pattern even if the robot did not perform well for the target behaviour ? (e.g. is a limb doing a movement with great potential ?)
 
     Step 3 — Scoring (each dimension 0–100)
 
     coherence — Is the gait relevant for the target behaviour ?
       0–29   = chaotic thrashing, immediate collapse, fully static or no recognisable pattern
       30–49  = unstable, sporadic; one or two coherent moments only that have a link to the target
-      50–69  = partial coherence; clear periodic pattern or specific movement but with wobble or stalls. The target can be identified.
+      50–69  = partial coherence; clear pattern or specific movement but with wobble or stalls. The target can be identified.
       70–89  = coherent, repeatable gait or target well reached ; minor instabilities only. The intention toward target is obvious.
-      90–100 = clean, stable, periodic locomotion throughout; the target is perfectly depicted through this video.
+      90–100 = clean, stable locomotion throughout; the target is perfectly depicted through this video.
 
     originality — Did the robot achieve something toward the behavioural target in an original way ?
       0–29   = no movement or movement very basic with no progress toward the target
@@ -115,13 +115,17 @@ def build_locomotion_prompt(target_behaviour: str) -> str:
       50–69  = one notable element (unusual gait phase, rhythm, recovery) that has potential
       70–89  = clearly interesting motion: reminiscent of an animal gait, coordinated pattern, or creative body usage to reach the target. Great potential.
       90–100 = highly interesting; novel and biologically convincing locomotion, great abilities and great potential for further evolution.
-
-    ═══ OUTPUT FORMAT ═══
-    Respond ONLY with valid JSON, no text before or after:
-
-    {output_format}
     """
 
+def get_reference_section() -> str:
+    return """═══ REFERENCE VIDEO ═══
+
+    The first video labeled "reference" shows the CURRENT BEST-PERFORMING controller
+    from the previous generation. It is provided as a contextual baseline ONLY.
+    — Do NOT score the reference. Do NOT include "reference" as a key in your JSON output.
+    Use the reference to better identify and reward genuine behavioural novelty and real
+    improvement over it. The reference is not a "good" solution, just a point of comparison that can be outperformed.
+    """
 
 def get_fake_answer() -> str:
     raw = {
@@ -143,7 +147,7 @@ def generate_fake_vlm_batch_response(robot_ids) -> str:
             "interpretation": "fake interpretation",
             "coherence":      {"score": random.randint(0, 100), "reason": f"Coherence reason for {robot_id}."},
             "originality":    {"score": random.randint(0, 100), "reason": f"Originality reason for {robot_id}."},
-            "potential":       {"score": random.randint(0, 100), "reason": f"potential reason for {robot_id}."},
+            "potential":      {"score": random.randint(0, 100), "reason": f"potential reason for {robot_id}."},
         }
     return json.dumps(robots_data, indent=2)
 

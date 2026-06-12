@@ -112,13 +112,13 @@ class ExperimentConfig:
     # Mutation σ for the per-generation log-normal noise on each weight.
     # σ_init is used to widen the *initial* population around the default
     # vector so gen-0 individuals do not all collapse to the same prior.
-    reward_mutation_sigma:     float = 0.3
-    reward_init_sigma:         float = 0.8
+    reward_mutation_sigma:     float = 0.5
+    reward_init_sigma:         float = 1.5
 
     # ---- MJX / JAX backend ---------------------------------------------------
     # Number of parallel environments vectorised via jax.vmap.
     # On Mac M2 (Metal) start low (64–128); bump to 512–2048 on a CUDA GPU.
-    n_envs_mjx:   int = 2048
+    n_envs_mjx:   int = 64
     # JAX backend: "cpu" | "gpu" | "metal"  (set before importing jax)
     jax_backend:  str = "metal"
 
@@ -146,11 +146,11 @@ class ExperimentConfig:
     control_frequency: int   = 20    # Hz — how often the policy outputs an action
     # MuJoCo timestep is set by the morphology XML (0.019 s); the env applies
     # the same action for `physics_steps_per_action` mj_steps.
-    fall_height:       float = 0.  # torso z below this terminates the episode
+    fall_height:       float = 0.1  # torso z below this terminates the episode
     # Action → joint-angle delta scale = prediction_factor / control_frequency.
     # -60 mirrors the CPU mujoco_env.py (≈3 rad/tick at 20 Hz — very fast/nervous).
     # Use a smaller magnitude (e.g. -15) for slower, smoother, more stable motion.
-    prediction_factor: float = -15.0
+    prediction_factor: float = -30.0
 
     # ---- Video / VLM render -------------------------------------------------
     video_fps:           int  = 20
@@ -220,7 +220,8 @@ class ExperimentConfig:
 
     def __post_init__(self):
         if not self.run_id:
-            self.run_id = datetime.now().strftime("run_%Y%m%d_%H%M%S")
+            # Readable, filesystem-safe: run_2026-06-12_11h44m03s
+            self.run_id = datetime.now().strftime("run_%Y-%m-%d_%Hh%Mm%Ss")
 
     @property
     def run_dir(self) -> Path:

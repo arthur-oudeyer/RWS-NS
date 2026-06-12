@@ -305,6 +305,158 @@ def _print_progress(generation, n_generations, phase, results, archive, elapsed_
 
 
 # ---------------------------------------------------------------------------
+# Human-readable run summary  (run_dir/SUMMARY.txt)
+# ---------------------------------------------------------------------------
+
+def _fmt_duration(seconds: float) -> str:
+    s = int(seconds)
+    h, rem = divmod(s, 3600)
+    m, s   = divmod(rem, 60)
+    if h:
+        return f"{h}h {m}m {s}s"
+    if m:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
+
+def _read_individuals_log(run_dir: Path) -> "list[dict]":
+    """Load every evaluated individual from individuals_log.jsonl."""
+    path = run_dir / "individuals_log.jsonl"
+    rows: list[dict] = []
+    if not path.exists():
+        return rows
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return rows
+
+
+def _write_summary(
+    run_dir:   Path,
+    cfg:       ExperimentConfig,
+    run_start: float,
+    status:    str = "running",
+    top_k:     int = 5,
+) -> None:
+    """Write a synthetic, human-readable SUMMARY.txt for the run.
+
+    Refreshed after every generation so a readable digest exists even if the
+    run later crashes. Built from individuals_log.jsonl (the full record of all
+    evaluated individuals), so it covers the whole history, not just the
+    surviving archive population.
+    """
+    rows    = _read_individuals_log(run_dir)
+    elapsed = time.time() - run_start
+
+    try:
+        target = _read_target_behaviour(cfg)
+    except Exception:
+        target = "(target file unavailable)"
+
+    # ---- run health --------------------------------------------------------
+    def _failed(r: dict) -> bool:
+        method = str(r.get("grader_method", ""))
+        err    = (r.get("grader_extra") or {}).get("error")
+        return method.endswith("_failed") or err is not None
+
+    n_total   = len(rows)
+    failed    = [r for r in rows if _failed(r)]
+    zero_fit  = [r for r in rows if float(r.get("fitness", 0.0)) == 0.0]
+
+    ranked = sorted(rows, key=lambda r: float(r.get("fitness", 0.0)), reverse=True)
+
+    L: list[str] = []
+    L.append("=" * 72)
+    L.append("  RUN SUMMARY")
+    L.append("=" * 72)
+    L.append(f"run_id          : {cfg.run_id}")
+    L.append(f"status          : {status}")
+    L.append(f"target          : {target!r}")
+    L.append(f"strategy        : {cfg.strategy}   (mu={cfg.mu}, lambda={cfg.lambda_})")
+    L.append(f"init population : {cfg.init_population_size or '(strategy default)'}")
+    L.append(f"generations     : {cfg.n_generations}")
+    L.append(f"steps / train   : init(gen0)={cfg.n_init_steps:,}   warm(children)={cfg.n_warm_steps:,}")
+    L.append(f"VLM grader      : {cfg.gemini_model}  "
+             f"n_score_request={cfg.n_score_request}  batch={cfg.batching}")
+    L.append(f"individuals eval: {n_total}")
+    L.append(f"total run time  : {_fmt_duration(elapsed)}")
+    L.append("")
+    L.append("-" * 72)
+    L.append("  RUN HEALTH")
+    L.append("-" * 72)
+    L.append(f"failed / wrong VLM answers : {len(failed)} / {n_total}")
+    L.append(f"zero-fitness individuals   : {len(zero_fit)} / {n_total}")
+    if failed:
+        L.append("  failed ids: " + ", ".join(
+            str(r.get("individual_id")) for r in failed[:20])
+            + (" …" if len(failed) > 20 else ""))
+    L.append("")
+
+    if not rows:
+        L.append("(no individuals evaluated yet)")
+        (run_dir / "SUMMARY.txt").write_text("\n".join(L) + "\n")
+        return
+
+    best = ranked[0]
+    L.append("-" * 72)
+    L.append("  BEST INDIVIDUAL")
+    L.append("-" * 72)
+    L.append(_format_individual(best))
+    L.append("")
+
+    L.append("-" * 72)
+    L.append(f"  TOP {min(top_k, len(ranked))} INDIVIDUALS")
+    L.append("-" * 72)
+    for rank, r in enumerate(ranked[:top_k], 1):
+        rs = r.get("raw_scores", {})
+        L.append(
+            f"  #{rank}  id={r.get('individual_id'):<4} gen={r.get('generation'):<3} "
+            f"parent={r.get('parent_id')}  fitness={float(r.get('fitness', 0.0)):+.4f}  "
+            f"(coh={rs.get('coherence', 0):.2f} orig={rs.get('originality', 0):.2f} "
+            f"pot={rs.get('potential', 0):.2f})")
+    L.append("")
+    L.append(f"(full machine-readable record: individuals_log.jsonl  ·  "
+             f"raw VLM responses: vlm_responses.jsonl  ·  full terminal: log.txt)")
+
+    (run_dir / "SUMMARY.txt").write_text("\n".join(L) + "\n")
+
+
+def _format_individual(r: dict) -> str:
+    rs    = r.get("raw_scores", {})
+    extra = r.get("grader_extra", {}) or {}
+    lines = [
+        f"id            : {r.get('individual_id')}",
+        f"generation    : {r.get('generation')}",
+        f"parent_id     : {r.get('parent_id')}",
+        f"fitness       : {float(r.get('fitness', 0.0)):+.4f}",
+        f"raw scores    : coherence={rs.get('coherence', 0):.3f}  "
+        f"originality={rs.get('originality', 0):.3f}  potential={rs.get('potential', 0):.3f}",
+    ]
+    if "fitness_std" in extra:
+        lines.append(f"score spread  : std={extra.get('fitness_std')} over "
+                     f"{extra.get('n_scored_ok')} requests  "
+                     f"samples={extra.get('fitness_samples')}")
+    lines.append(f"policy params : {r.get('policy_path')}")
+    lines.append(f"video (mp4)   : {r.get('video_path')}")
+    # Reasons from the VLM
+    if extra.get("observation"):
+        lines.append(f"observation   : {extra['observation']}")
+    if extra.get("interpretation"):
+        lines.append(f"interpretation: {extra['interpretation']}")
+    for dim in ("coherence", "originality", "potential"):
+        reason = extra.get(f"{dim}_reason")
+        if reason:
+            lines.append(f"  {dim:<11} : {reason}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # run_mjx()
 # ---------------------------------------------------------------------------
 
@@ -328,6 +480,7 @@ def run_mjx(
     log_path       = run_dir / "log.jsonl"
     indiv_log_path = run_dir / "individuals_log.jsonl"
     run_dir.mkdir(parents=True, exist_ok=True)
+    run_start      = time.time()
 
     cfg.save(str(run_dir / "config.json"))
     print(f"\n{'=' * 60}")
@@ -357,6 +510,7 @@ def run_mjx(
     _log_generation(log_path, 0, "init", init_results, archive, elapsed)
     if 0 % cfg.save_every_n_gen == 0:
         _save_archive(archive, _archive_path(run_dir, 0))
+    _write_summary(run_dir, cfg, run_start, status="running (gen 0 done)")
 
     # ---- Evolution loop ------------------------------------------------------
     for generation in range(1, cfg.n_generations + 1):
@@ -373,11 +527,15 @@ def run_mjx(
         _log_generation(log_path, generation, "step", results, archive, elapsed)
         if generation % cfg.save_every_n_gen == 0:
             _save_archive(archive, _archive_path(run_dir, generation))
+        _write_summary(run_dir, cfg, run_start,
+                       status=f"running (gen {generation}/{cfg.n_generations} done)")
 
     # ---- Final save ----------------------------------------------------------
     final_path = run_dir / "archive_final.json"
     _save_archive(archive, final_path)
+    _write_summary(run_dir, cfg, run_start, status="completed")
     print(f"\n[experiment_mjx] Done. Final archive → {final_path}")
+    print(f"[experiment_mjx] Summary → {run_dir / 'SUMMARY.txt'}")
     archive.summary()
     return archive
 
@@ -414,6 +572,7 @@ def resume_mjx(run_dir: Union[str, Path], grader=None):
     rng = np.random.default_rng(cfg.seed + start_gen)
     evo = make_evolution_mjx(cfg, run_dir=run_dir, rng=rng)
     evo.verbose_training = cfg.verbose_training   # per-update PPO progress (fps, rw, losses)
+    run_start = time.time()
 
     for generation in range(start_gen, cfg.n_generations + 1):
         t0 = time.perf_counter()
@@ -426,9 +585,12 @@ def resume_mjx(run_dir: Union[str, Path], grader=None):
         _log_generation(log_path, generation, "step", results, archive, elapsed)
         if generation % cfg.save_every_n_gen == 0:
             _save_archive(archive, _archive_path(run_dir, generation))
+        _write_summary(run_dir, cfg, run_start,
+                       status=f"resumed · running (gen {generation}/{cfg.n_generations} done)")
 
     final_path = run_dir / "archive_final.json"
     _save_archive(archive, final_path)
+    _write_summary(run_dir, cfg, run_start, status="completed (resumed)")
     archive.summary()
     return archive
 
