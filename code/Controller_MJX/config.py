@@ -7,7 +7,7 @@ Mirrors `Morphology/config.py` so the directory layout and run conventions
 match. The fields specific to the controller study are:
 
   - reward weight defaults and per-dimension mutation σ
-  - PPO budgets (`n_init_steps`, `n_warm_steps`, `n_envs`, …)
+  - PPO budgets (`n_init_steps`, `n_warm_steps`, `n_envs_mjx`, …)
   - episode duration and physics rollout length
   - video render settings for the rollout MP4
 
@@ -54,7 +54,7 @@ class ExperimentConfig:
     Identity        : run_id, seed, description, strategy
     Population      : mu, lambda_, sigma (random injections), n_generations
     Reward weights  : default values + per-mutation σ
-    PPO inner loop  : n_init_steps, n_warm_steps, n_envs, policy_arch
+    PPO inner loop  : n_init_steps, n_warm_steps, n_envs_mjx, policy_arch
     Env / episode   : episode_duration, fall_height, control_frequency
     Video render    : video_fps, render_w/h, episode_seconds_recorded
     Grader          : gemini_model, batching, prompt_name, descriptor_config
@@ -118,14 +118,13 @@ class ExperimentConfig:
     # ---- MJX / JAX backend ---------------------------------------------------
     # Number of parallel environments vectorised via jax.vmap.
     # On Mac M2 (Metal) start low (64–128); bump to 512–2048 on a CUDA GPU.
-    n_envs_mjx:   int = 64
+    n_envs_mjx:   int = 2048
     # JAX backend: "cpu" | "gpu" | "metal"  (set before importing jax)
     jax_backend:  str = "metal"
 
     # ---- PPO inner loop -----------------------------------------------------
     n_init_steps: int = 5_000_000      # from-scratch training budget (gen 0)
-    n_warm_steps: int = 2_500_000      # warm-start budget for mutated childrenOkay
-    n_envs:       int = 2048
+    n_warm_steps: int = 2_500_000      # warm-start budget for mutated children
     policy_arch:  list = field(default_factory=lambda: [256, 256])
     learning_rate:    float = 3e-4
     gamma:            float = 0.99
@@ -287,7 +286,7 @@ class ExperimentConfig:
             print(f"  population   : μ={self.mu}  λ={self.lambda_}  σ={self.sigma}  generations={self.n_generations}")
         else:
             print(f"  population   : λ={self.lambda_}  σ={self.sigma}  generations={self.n_generations}  descriptors={self.descriptor_config_name}")
-        print(f"  PPO          : init={self.n_init_steps:,}  warm={self.n_warm_steps:,}  envs={self.n_envs}  arch={self.policy_arch}")
+        print(f"  PPO          : init={self.n_init_steps:,}  warm={self.n_warm_steps:,}  envs={self.n_envs_mjx}  arch={self.policy_arch}")
         print(f"  episode      : {self.episode_duration}s  ctrl_freq={self.control_frequency} Hz  fall_h={self.fall_height} m")
         print(f"  reward σ     : init={self.reward_init_sigma}  mut={self.reward_mutation_sigma}")
         print(f"  reward defaults : {self.default_reward_weights_dict()}")
