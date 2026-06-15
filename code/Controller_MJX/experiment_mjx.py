@@ -400,7 +400,7 @@ def _write_summary(
     L.append(f"status          : {status}")
     L.append(f"target          : {target!r}")
     L.append(f"strategy        : {cfg.strategy}   (mu={cfg.mu}, lambda={cfg.lambda_})")
-    L.append(f"init population : {cfg.init_population_size or '(strategy default)'}")
+    L.append(f"init population : {cfg.resolved_init_population_size()}")
     L.append(f"generations     : {cfg.n_generations}")
     L.append(f"steps / train   : init(gen0)={cfg.n_init_steps:,}   warm(children)={cfg.n_warm_steps:,}")
     L.append(f"VLM grader      : {cfg.gemini_model}  "
@@ -538,7 +538,7 @@ def run_mjx(
 
     # ---- Generation 0 --------------------------------------------------------
     print(f"\n[experiment_mjx] Initial population — "
-          f"{cfg.init_population_size or '(default)'} individuals.")
+          f"{cfg.resolved_init_population_size()} individuals.")
     t0 = time.perf_counter()
     init_results, id_counter = evo.initialise(grader, id_counter=0)
     archive.update(init_results)
@@ -647,6 +647,9 @@ def _cli():
     parser.add_argument("--mu",          type=int, default=None)
     parser.add_argument("--lambda_",     type=int, default=None)
     parser.add_argument("--n_gen",       type=int, default=None)
+    parser.add_argument("--init_ind",    type=int, default=None,
+                        help="number of gen-0 individuals trained from scratch "
+                             "(overrides init_population_size; 0 = strategy default)")
     parser.add_argument("--n_init_steps",type=int, default=None)
     parser.add_argument("--n_warm_steps",type=int, default=None)
     parser.add_argument("--n_envs_mjx",  type=int, default=None)
@@ -677,6 +680,7 @@ def _cli():
     if args.mu is not None:            cfg.mu = args.mu
     if args.lambda_ is not None:       cfg.lambda_ = args.lambda_
     if args.n_gen is not None:         cfg.n_generations = args.n_gen
+    if args.init_ind is not None:      cfg.init_population_size = args.init_ind
     if args.n_init_steps is not None:  cfg.n_init_steps = args.n_init_steps
     if args.n_warm_steps is not None:  cfg.n_warm_steps = args.n_warm_steps
     if args.n_envs_mjx is not None:    cfg.n_envs_mjx = args.n_envs_mjx

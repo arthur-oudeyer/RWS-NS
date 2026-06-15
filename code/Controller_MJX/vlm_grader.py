@@ -90,6 +90,8 @@ class LocomotionGrader:
         upload_poll_seconds: float = 1.0,
         n_score_request:     int = 1,
         descriptor_config         = None,
+        max_retries:         int = 4,
+        retry_base_delay:    float = 5.0,
         debug:               bool = False,
     ):
         self._prompt_config     = prompt_config
@@ -99,6 +101,12 @@ class LocomotionGrader:
         self._response_log_path = response_log_path
         self._upload_poll       = upload_poll_seconds
         self._n_score_request   = max(1, n_score_request)
+        # Transient Gemini errors (503 UNAVAILABLE, 429, 500, timeouts) must not
+        # abort a multi-hour run. Each batch request is retried up to max_retries
+        # times with exponential backoff; if it still fails the chunk degrades to
+        # fitness 0.0 instead of raising.
+        self._max_retries       = max(0, max_retries)
+        self._retry_base_delay  = max(0.0, retry_base_delay)
         # Optional descriptor.DescriptorConfig — when set, the VLM is asked to
         # assign each behavioural feature axis (MAP-Elites). dim names are read
         # from .feature_dims; per-dim prompt text from .items.
@@ -205,7 +213,14 @@ class LocomotionGrader:
             text = generate_fake_vlm_batch_response(ids, descriptor_dims=self._descriptor_dims)
             self._log_response("batch", ids, text)
         else:
-            text = self._score_chunk_remote(chunk, ids, reference_video, dbg)
+            try:
+                text = self._score_chunk_remote(chunk, ids, reference_video, dbg)
+            except Exception as e:
+                # Retries already exhausted inside _score_chunk_remote — degrade
+                # this chunk to fitness 0.0 so the whole run survives the outage.
+                print(f"[vlm_grader] ERROR: batch request failed after retries "
+                      f"({e}); assigning fitness 0.0 to {ids}.", flush=True)
+                return {vid: self._fallback_output(f"api_error: {e}") for vid in ids}
 
         try:
             parsed = self._parse_json(text)
@@ -316,8 +331,7 @@ class LocomotionGrader:
                 ref_str = " + reference" if ref_file else ""
                 print(f"  [vlm_grader/batch] sending {len(chunk)} videos{ref_str} …")
 
-            response = self._client.models.generate_content(
-                model=self._model_name, contents=contents)
+            response = self._generate_with_retry(contents, ids)
             text = response.text
             self._log_response("batch", ids, text)
             return text
@@ -332,6 +346,39 @@ class LocomotionGrader:
                     self._client.files.delete(name=ref_file.name)
                 except Exception:
                     pass
+
+    @staticmethod
+    def _is_transient(exc: Exception) -> bool:
+        """True for retryable Gemini errors (server overload / rate limit / timeout)."""
+        code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+        if code in (429, 500, 502, 503, 504):
+            return True
+        msg = str(exc).upper()
+        return any(tok in msg for tok in
+                   ("UNAVAILABLE", "RESOURCE_EXHAUSTED", "DEADLINE_EXCEEDED",
+                    "INTERNAL", "503", "429", "TIMEOUT", "OVERLOADED"))
+
+    def _generate_with_retry(self, contents, ids):
+        """Call generate_content, retrying transient errors with exponential backoff.
+
+        Raises the last exception if all attempts fail (caller degrades the chunk
+        to fitness 0.0 rather than crashing the run).
+        """
+        last_exc: Exception = RuntimeError("no attempt made")
+        for attempt in range(self._max_retries + 1):
+            try:
+                return self._client.models.generate_content(
+                    model=self._model_name, contents=contents)
+            except Exception as e:
+                last_exc = e
+                if attempt >= self._max_retries or not self._is_transient(e):
+                    raise
+                delay = self._retry_base_delay * (2 ** attempt)
+                print(f"[vlm_grader] transient API error on {ids} "
+                      f"(attempt {attempt+1}/{self._max_retries+1}): {e}\n"
+                      f"             retrying in {delay:.0f}s …", flush=True)
+                time.sleep(delay)
+        raise last_exc
 
     # ------------------------------------------------------------------
     # Prompt building / parsing

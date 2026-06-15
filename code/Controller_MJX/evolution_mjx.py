@@ -415,7 +415,7 @@ class MuLambdaEvolutionMJX(BaseEvolutionMJX):
     """(μ+λ) evolution using MJX training and rendering."""
 
     def initialise(self, grader, id_counter: int = 0):
-        size     = self.cfg.init_population_size if self.cfg.init_population_size != 0 else (self.cfg.mu * 3)
+        size     = self.cfg.resolved_init_population_size()
         defaults = self.cfg.default_reward_weights_dict()
 
         specs: list[_IndividualSpec] = []
@@ -522,15 +522,19 @@ class MapEliteEvolutionMJX(BaseEvolutionMJX):
     """MAP-Elites variant using MJX training and rendering."""
 
     def initialise(self, grader, id_counter: int = 0):
-        size     = self.cfg.init_population_size or max(self.cfg.mu, self.cfg.lambda_) * 2
+        size     = self.cfg.resolved_init_population_size()
         defaults = self.cfg.default_reward_weights_dict()
 
         specs: list[_IndividualSpec] = []
         ids = list(range(id_counter, id_counter + size))
-        for ind_id in ids:
+        for k, ind_id in enumerate(ids):
             rw         = random_initial_weights(defaults, sigma=self.cfg.reward_init_sigma, rng=self.rng)
             seed       = int(self.cfg.seed) + ind_id
+            print(f"\r  [init {k+1}/{size}] training id={ind_id} from scratch "
+                  f"({self.cfg.n_init_steps:,} steps) …", end="", flush=True)
+            t0 = time.perf_counter()
             policy_path, params, fitness = self._train_from_scratch(rw, seed, ind_id)
+            print(f"\r  [init {k+1}/{size}] rendering id={ind_id} …", end="", flush=True)
             video_path = self._render(params, rw, ind_id, generation=0, seed=seed)
             specs.append(_IndividualSpec(
                 reward_weights = rw.to_dict(),
@@ -539,6 +543,8 @@ class MapEliteEvolutionMJX(BaseEvolutionMJX):
                 parent_id      = None,
                 n_train_steps  = self.cfg.n_init_steps,
             ))
+            print(f"\r  [init {k+1}/{size}] id={ind_id} done in "
+                  f"{time.perf_counter()-t0:.1f}s  fitness={fitness:.3f}")
 
         return evaluate_batch(
             specs, grader, generation=0, id_counter=id_counter,
@@ -562,7 +568,11 @@ class MapEliteEvolutionMJX(BaseEvolutionMJX):
             child_rw      = mutate_weights(parent_rw, sigma=self.cfg.reward_mutation_sigma, rng=self.rng)
             seed          = int(self.cfg.seed) + 1000 * generation + ind_id
             parent_params = load_params(parent.policy_path)
-            policy_path, params, _ = self._train_warm_start(child_rw, parent_params, seed, ind_id)
+            print(f"\r  [step] {k+1}/{len(sampled_parents)} gen={generation} "
+                  f"id={ind_id} warm-start {self.cfg.n_warm_steps:,} steps …",
+                  end="", flush=True)
+            t0 = time.perf_counter()
+            policy_path, params, fitness = self._train_warm_start(child_rw, parent_params, seed, ind_id)
             video_path = self._render(params, child_rw, ind_id, generation, seed)
             specs.append(_IndividualSpec(
                 reward_weights = child_rw.to_dict(),
@@ -571,6 +581,8 @@ class MapEliteEvolutionMJX(BaseEvolutionMJX):
                 parent_id      = parent.individual_id,
                 n_train_steps  = self.cfg.n_warm_steps,
             ))
+            print(f"\r  [step] {k+1}/{len(sampled_parents)} id={ind_id} done in "
+                  f"{time.perf_counter()-t0:.1f}s  fitness={fitness:.3f}")
 
         return evaluate_batch(
             specs, grader, generation=generation, id_counter=id_counter,

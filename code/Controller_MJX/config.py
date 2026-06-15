@@ -69,9 +69,9 @@ class ExperimentConfig:
 
     # ---- Population ---------------------------------------------------------
     mu:            int = 1
-    lambda_:       int = 3
+    lambda_:       int = 1
     sigma:         int = 0          # fresh random individuals injected per gen
-    n_generations: int = 2
+    n_generations: int = 1
 
     # init_population_size : number of random individuals trained from scratch
     # at gen 0. mu_lambda → defaults to mu*3; map_elite → max(mu, lambda_)*2.
@@ -280,6 +280,22 @@ class ExperimentConfig:
             "horizontal_velocity_penalty": self.rw_horizontal_velocity_penalty,
         }
 
+    # ---- Population helpers --------------------------------------------------
+
+    def resolved_init_population_size(self) -> int:
+        """Actual number of gen-0 from-scratch individuals.
+
+        Set it explicitly via `init_population_size` (config) or `--init_ind`.
+        When 0, a strategy default applies:
+          mu_lambda → mu * 3
+          map_elite → lambda_ * 2   (μ is unused by MAP-Elites)
+        """
+        if self.init_population_size:
+            return self.init_population_size
+        if self.strategy == "map_elite":
+            return self.lambda_ * 2
+        return self.mu * 3
+
     # ---- Display ------------------------------------------------------------
 
     def describe(self) -> None:
@@ -289,6 +305,7 @@ class ExperimentConfig:
             print(f"  population   : μ={self.mu}  λ={self.lambda_}  σ={self.sigma}  generations={self.n_generations}")
         else:
             print(f"  population   : λ={self.lambda_}  σ={self.sigma}  generations={self.n_generations}  descriptors={self.descriptor_config_name}")
+        print(f"  init pop     : {self.resolved_init_population_size()} individuals trained from scratch (gen 0)")
         print(f"  PPO          : init={self.n_init_steps:,}  warm={self.n_warm_steps:,}  envs={self.n_envs_mjx}  arch={self.policy_arch}")
         print(f"  episode      : {self.episode_duration}s  ctrl_freq={self.control_frequency} Hz  fall_h={self.fall_height} m")
         print(f"  reward σ     : init={self.reward_init_sigma}  mut={self.reward_mutation_sigma}")
