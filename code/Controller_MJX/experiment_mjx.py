@@ -181,12 +181,30 @@ def _read_target_behaviour(cfg: ExperimentConfig) -> str:
     return text
 
 
+def _load_descriptor_config(cfg: ExperimentConfig):
+    """Load the MAP-Elites descriptor config for this run, or None.
+
+    Only meaningful for strategy="map_elite". Raises a clear error if the
+    configured name is unknown — a silent fallback would collapse the grid to a
+    single cell and waste hours of GPU time.
+    """
+    if cfg.strategy != "map_elite" or not cfg.descriptor_config_name:
+        return None
+    from descriptor import get_descriptor_config
+    return get_descriptor_config(cfg.descriptor_config_name)
+
+
 def _make_grader(cfg: ExperimentConfig):
     if cfg.grader_type != "gemini":
         raise NotImplementedError(f"grader_type={cfg.grader_type!r} not supported (VLM only).")
 
     from gemini_prompts import make_prompt_config, LocomotionScoringWeights
     from vlm_grader     import LocomotionGrader
+
+    descriptor_config = _load_descriptor_config(cfg)
+    if descriptor_config is not None:
+        print(f"[experiment_mjx] MAP-Elites descriptors: {cfg.descriptor_config_name} "
+              f"→ {descriptor_config.feature_dims}")
 
     target  = _read_target_behaviour(cfg)
     weights = LocomotionScoringWeights(
@@ -212,6 +230,7 @@ def _make_grader(cfg: ExperimentConfig):
             fake              = True,
             response_log_path = log_path,
             n_score_request   = cfg.n_score_request,
+            descriptor_config = descriptor_config,
             debug             = False,
         )
 
@@ -225,6 +244,7 @@ def _make_grader(cfg: ExperimentConfig):
         fake              = False,
         response_log_path = log_path,
         n_score_request   = cfg.n_score_request,
+        descriptor_config = descriptor_config,
         debug             = False,
     )
 
@@ -233,16 +253,16 @@ def _make_archive(cfg: ExperimentConfig):
     if cfg.strategy == "mu_lambda":
         return MuLambdaArchive(mu=cfg.mu)
     if cfg.strategy == "map_elite":
-        feature_dims = []; feature_bins: dict = {}; dim_labels: dict = {}
-        if cfg.descriptor_config_name:
-            try:
-                from descriptor import get_descriptor_config
-                d = get_descriptor_config(cfg.descriptor_config_name)
-                feature_dims = list(d.feature_dims)
-                feature_bins = {item.name: item.bins for item in d.items if item.bins}
-                dim_labels   = {item.name: item.bin_labels for item in d.items if item.bin_labels}
-            except Exception:
-                pass
+        d = _load_descriptor_config(cfg)
+        if d is None:
+            raise ValueError(
+                "strategy='map_elite' requires a valid descriptor_config_name "
+                f"(got {cfg.descriptor_config_name!r}). Without it the grid collapses "
+                "to a single cell. See descriptor.py for available configs."
+            )
+        feature_dims = list(d.feature_dims)
+        feature_bins = {item.name: item.bins for item in d.items if item.bins}
+        dim_labels   = {item.name: item.bin_labels for item in d.items if item.bin_labels}
         return MapEliteArchive(feature_dims=feature_dims, feature_bins=feature_bins, dim_labels=dim_labels)
     raise ValueError(f"Unknown strategy: {cfg.strategy!r}")
 
@@ -343,6 +363,7 @@ def _write_summary(
     run_start: float,
     status:    str = "running",
     top_k:     int = 5,
+    archive          = None,
 ) -> None:
     """Write a synthetic, human-readable SUMMARY.txt for the run.
 
@@ -397,6 +418,23 @@ def _write_summary(
             str(r.get("individual_id")) for r in failed[:20])
             + (" …" if len(failed) > 20 else ""))
     L.append("")
+
+    # ---- MAP-Elites grid ---------------------------------------------------
+    if archive is not None and getattr(archive, "grid", None) is not None:
+        L.append("-" * 72)
+        L.append("  MAP-ELITES GRID")
+        L.append("-" * 72)
+        n_buckets = 1
+        for dim in archive.feature_dims:
+            n_buckets *= len(archive.feature_bins.get(dim, [])) + 1
+        L.append(f"descriptor cfg  : {cfg.descriptor_config_name}  "
+                 f"axes={archive.feature_dims}")
+        L.append(f"cells filled    : {len(archive.grid)} / {n_buckets}")
+        for key in sorted(archive.grid):
+            r = archive.grid[key]
+            L.append(f"  {archive.feature_label(key):<44} "
+                     f"fitness={r.fitness:+.4f}  id={r.individual_id}")
+        L.append("")
 
     if not rows:
         L.append("(no individuals evaluated yet)")
@@ -510,7 +548,7 @@ def run_mjx(
     _log_generation(log_path, 0, "init", init_results, archive, elapsed)
     if 0 % cfg.save_every_n_gen == 0:
         _save_archive(archive, _archive_path(run_dir, 0))
-    _write_summary(run_dir, cfg, run_start, status="running (gen 0 done)")
+    _write_summary(run_dir, cfg, run_start, status="running (gen 0 done)", archive=archive)
 
     # ---- Evolution loop ------------------------------------------------------
     for generation in range(1, cfg.n_generations + 1):
@@ -528,12 +566,13 @@ def run_mjx(
         if generation % cfg.save_every_n_gen == 0:
             _save_archive(archive, _archive_path(run_dir, generation))
         _write_summary(run_dir, cfg, run_start,
-                       status=f"running (gen {generation}/{cfg.n_generations} done)")
+                       status=f"running (gen {generation}/{cfg.n_generations} done)",
+                       archive=archive)
 
     # ---- Final save ----------------------------------------------------------
     final_path = run_dir / "archive_final.json"
     _save_archive(archive, final_path)
-    _write_summary(run_dir, cfg, run_start, status="completed")
+    _write_summary(run_dir, cfg, run_start, status="completed", archive=archive)
     print(f"\n[experiment_mjx] Done. Final archive → {final_path}")
     print(f"[experiment_mjx] Summary → {run_dir / 'SUMMARY.txt'}")
     archive.summary()
@@ -586,11 +625,12 @@ def resume_mjx(run_dir: Union[str, Path], grader=None):
         if generation % cfg.save_every_n_gen == 0:
             _save_archive(archive, _archive_path(run_dir, generation))
         _write_summary(run_dir, cfg, run_start,
-                       status=f"resumed · running (gen {generation}/{cfg.n_generations} done)")
+                       status=f"resumed · running (gen {generation}/{cfg.n_generations} done)",
+                       archive=archive)
 
     final_path = run_dir / "archive_final.json"
     _save_archive(archive, final_path)
-    _write_summary(run_dir, cfg, run_start, status="completed (resumed)")
+    _write_summary(run_dir, cfg, run_start, status="completed (resumed)", archive=archive)
     archive.summary()
     return archive
 
@@ -602,6 +642,8 @@ def resume_mjx(run_dir: Union[str, Path], grader=None):
 def _cli():
     parser = argparse.ArgumentParser(description="MJX controller-study experiment.")
     parser.add_argument("--strategy",    default=None, choices=["mu_lambda", "map_elite"])
+    parser.add_argument("--descriptor",  default=None,
+                        help="MAP-Elites descriptor config name (see descriptor.py)")
     parser.add_argument("--mu",          type=int, default=None)
     parser.add_argument("--lambda_",     type=int, default=None)
     parser.add_argument("--n_gen",       type=int, default=None)
@@ -631,6 +673,7 @@ def _cli():
 
     cfg = ExperimentConfig()
     if args.strategy is not None:      cfg.strategy = args.strategy
+    if args.descriptor is not None:    cfg.descriptor_config_name = args.descriptor
     if args.mu is not None:            cfg.mu = args.mu
     if args.lambda_ is not None:       cfg.lambda_ = args.lambda_
     if args.n_gen is not None:         cfg.n_generations = args.n_gen

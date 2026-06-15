@@ -34,7 +34,8 @@ from gemini_prompts import (
     OUTPUT_MARKER,
     get_fake_answer,
     generate_fake_vlm_batch_response,
-    get_reference_section
+    get_reference_section,
+    build_descriptor_section,
 )
 
 try:
@@ -88,6 +89,7 @@ class LocomotionGrader:
         response_log_path:   Optional[str] = None,
         upload_poll_seconds: float = 1.0,
         n_score_request:     int = 1,
+        descriptor_config         = None,
         debug:               bool = False,
     ):
         self._prompt_config     = prompt_config
@@ -97,6 +99,13 @@ class LocomotionGrader:
         self._response_log_path = response_log_path
         self._upload_poll       = upload_poll_seconds
         self._n_score_request   = max(1, n_score_request)
+        # Optional descriptor.DescriptorConfig — when set, the VLM is asked to
+        # assign each behavioural feature axis (MAP-Elites). dim names are read
+        # from .feature_dims; per-dim prompt text from .items.
+        self._descriptor_config = descriptor_config
+        self._descriptor_dims   = (
+            list(descriptor_config.feature_dims) if descriptor_config else []
+        )
         self.debug              = debug
 
         if not fake:
@@ -193,7 +202,7 @@ class LocomotionGrader:
         out: dict[str, GraderOutput] = {}
 
         if self._fake:
-            text = generate_fake_vlm_batch_response(ids)
+            text = generate_fake_vlm_batch_response(ids, descriptor_dims=self._descriptor_dims)
             self._log_response("batch", ids, text)
         else:
             text = self._score_chunk_remote(chunk, ids, reference_video, dbg)
@@ -262,6 +271,19 @@ class LocomotionGrader:
             "fitness_std":      round(std_fit, 4),
         })
 
+        # Average the MAP-Elites descriptors per axis across successful requests
+        # (each on the 0–100 scale). A dim is averaged only over the requests
+        # that actually reported it.
+        if self._descriptor_dims:
+            desc_mean: dict = {}
+            for dim in self._descriptor_dims:
+                vals = [o.extra.get("vlm_descriptors", {}).get(dim)
+                        for o in good]
+                vals = [v for v in vals if v is not None]
+                if vals:
+                    desc_mean[dim] = round(sum(vals) / len(vals), 4)
+            base["vlm_descriptors"] = desc_mean
+
         return GraderOutput(
             fitness    = fitness,
             raw_scores = {k: round(means[k], 4) for k in keys},
@@ -320,13 +342,27 @@ class LocomotionGrader:
         base = self._prompt_config.prompt
         body = base[:base.index(OUTPUT_MARKER)].rstrip() if OUTPUT_MARKER in base else base.rstrip()
 
+        # Optional MAP-Elites descriptor block appended to each video's schema.
+        descriptor_schema = ""
+        descriptor_section = ""
+        if self._descriptor_dims:
+            dim_lines = ",\n".join(
+                f'        "{dim}":        {{ "score": <int 0-100>, "reason": "..." }}'
+                for dim in self._descriptor_dims
+            )
+            descriptor_schema = (
+                ',\n      "descriptors": {\n' + dim_lines + "\n      }"
+            )
+            descriptor_section = build_descriptor_section(self._descriptor_config.items)
+
         single_schema = (
             "{\n"
             '      "observation":    "factual description",\n'
             '      "interpretation": "behavioural interpretation",\n'
             '      "coherence":      { "score": <int 0-100>, "reason": "..." },\n'
             '      "originality":    { "score": <int 0-100>, "reason": "..." },\n'
-            '      "potential":      { "score": <int 0-100>, "reason": "..." }\n'
+            '      "potential":      { "score": <int 0-100>, "reason": "..." }'
+            + descriptor_schema + "\n"
             "    }"
         )
 
@@ -340,10 +376,12 @@ class LocomotionGrader:
     You will evaluate {len(ids)} robot rollout videos in one pass.
     Each video was labeled before being sent: {id_list}.
     Evaluate each one independently.
-    
+
     {reference_section}
-    
+
     {body}
+
+    {descriptor_section}
 
     ═══ OUTPUT FORMAT ═══
     Respond ONLY with valid JSON, no text before or after.
@@ -408,6 +446,30 @@ class LocomotionGrader:
             print(f"  coherence={coherence:.2f}  originality={originality:.2f}  "
                   f"potential={potential:.2f}  → fitness={fitness:.4f}")
 
+        # MAP-Elites descriptors: per-axis int 0–100 (kept on the 0–100 scale so
+        # MapEliteArchive can bin them with edges expressed in the same range).
+        vlm_descriptors: dict = {}
+        descriptor_reasons: dict = {}
+        if self._descriptor_dims:
+            desc_block = parsed.get("descriptors", {}) or {}
+            for dim in self._descriptor_dims:
+                val = desc_block.get(dim)
+                if val is None:
+                    continue
+                if isinstance(val, dict):
+                    try:
+                        vlm_descriptors[dim] = float(val.get("score", 0))
+                    except (TypeError, ValueError):
+                        continue
+                    descriptor_reasons[dim] = val.get("reason", "")
+                else:
+                    try:
+                        vlm_descriptors[dim] = float(val)
+                    except (TypeError, ValueError):
+                        continue
+            if dbg:
+                print(f"  descriptors={vlm_descriptors}")
+
         return GraderOutput(
             fitness    = fitness,
             raw_scores = {
@@ -423,7 +485,8 @@ class LocomotionGrader:
                 "coherence_reason":  _reason("coherence"),
                 "originality_reason":_reason("originality"),
                 "potential_reason":   _reason("potential"),
-                "vlm_descriptors":   {},   # MAP-Elites descriptors not wired yet
+                "vlm_descriptors":   vlm_descriptors,
+                "descriptor_reasons": descriptor_reasons,
             },
         )
 

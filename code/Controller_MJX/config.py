@@ -206,7 +206,10 @@ class ExperimentConfig:
     # Use synthetic VLM responses (no network / no API cost) for wiring tests.
     use_fake_grader: bool = False
 
-    descriptor_config_name: str = ""  # "" = no MAP-Elites descriptors
+    # MAP-Elites feature space (see descriptor.py). Used only by strategy="map_elite";
+    # ignored by mu_lambda. Selects which 2-D behavioural axes the VLM scores and the
+    # grid diversifies over. "" disables descriptors (collapses to a single cell).
+    descriptor_config_name: str = "coordination_amplitude"
 
     # ---- Output -------------------------------------------------------------
     output_dir:            str  = "results"

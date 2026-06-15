@@ -117,6 +117,29 @@ def build_locomotion_prompt(target_behaviour: str) -> str:
       90–100 = highly interesting; novel and biologically convincing locomotion, great abilities and great potential for further evolution.
     """
 
+def build_descriptor_section(items: list) -> str:
+    """Instruction block asking the VLM to assign each MAP-Elites feature axis.
+
+    `items` is a list of descriptor.DescriptorDim. Each becomes an int 0–100
+    score (+ short reason) in the per-video "descriptors" block, which the
+    archive bins into a grid cell. Scores stay on 0–100 (NOT divided to [0,1]).
+    """
+    lines = [
+        "    ═══ BEHAVIOURAL FEATURES (for diversity mapping) ═══",
+        "",
+        "    Independently of the scores above, rate the following behavioural",
+        "    features of EACH robot on a 0–100 scale. These describe HOW the robot",
+        "    moves (not how good it is) and are used to map behavioural diversity.",
+        "",
+    ]
+    for it in items:
+        lines.append(f"    • {it.name} — {it.description}")
+        lines.append(f"        0   = {it.low_desc}")
+        lines.append(f"        100 = {it.high_desc}")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def get_reference_section() -> str:
     return """═══ REFERENCE VIDEO ═══
 
@@ -138,17 +161,28 @@ def get_fake_answer() -> str:
     return json.dumps(raw, indent=2)
 
 
-def generate_fake_vlm_batch_response(robot_ids) -> str:
-    """Fake batch VLM response keyed by robot id (for wiring tests, no network)."""
+def generate_fake_vlm_batch_response(robot_ids, descriptor_dims=None) -> str:
+    """Fake batch VLM response keyed by robot id (for wiring tests, no network).
+
+    When `descriptor_dims` (a list of dim-name strings) is given, each robot also
+    gets a `descriptors` block with random 0–100 scores so fake-mode MAP-Elites
+    runs actually spread individuals across grid cells.
+    """
     robots_data = {}
     for robot_id in robot_ids:
-        robots_data[robot_id] = {
+        entry = {
             "observation":    "fake observation",
             "interpretation": "fake interpretation",
             "coherence":      {"score": random.randint(0, 100), "reason": f"Coherence reason for {robot_id}."},
             "originality":    {"score": random.randint(0, 100), "reason": f"Originality reason for {robot_id}."},
             "potential":      {"score": random.randint(0, 100), "reason": f"potential reason for {robot_id}."},
         }
+        if descriptor_dims:
+            entry["descriptors"] = {
+                dim: {"score": random.randint(0, 100), "reason": f"{dim} reason for {robot_id}."}
+                for dim in descriptor_dims
+            }
+        robots_data[robot_id] = entry
     return json.dumps(robots_data, indent=2)
 
 
