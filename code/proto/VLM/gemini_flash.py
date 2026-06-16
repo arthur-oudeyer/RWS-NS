@@ -4,6 +4,7 @@ import json
 import sys, os
 import time
 from pathlib import Path
+import time
 
 # ── Config ────────────────────────────────────────────────────────────────────
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -26,6 +27,8 @@ def score_robot_video(video_path: str, target_behaviour: str) -> dict:
         print(f"❌ Video not found : {video_path}")
         sys.exit(1)
 
+    t_start = time.time()
+
     print(f"🎬 Uploading : {video_path}")
     video_file = client.files.upload(
         file=video_path,
@@ -42,7 +45,7 @@ def score_robot_video(video_path: str, target_behaviour: str) -> dict:
         print("❌ Video processing failed")
         sys.exit(1)
 
-    print("✅ Video ready, sending to model...")
+    print(f"✅ Video ready in {time.time() - t_start} s, sending to model...")
 
     output_format = """\
         {
@@ -100,6 +103,7 @@ def score_robot_video(video_path: str, target_behaviour: str) -> dict:
         {output_format}
         """
 
+    t_start = time.time()
     response = client.models.generate_content(
         model=MODEL,
         contents=[
@@ -112,6 +116,7 @@ def score_robot_video(video_path: str, target_behaviour: str) -> dict:
     )
 
     text = response.text
+    print(f"Response received in {time.time() - t_start} s")
 
     # Cleanup
     client.files.delete(name=video_file.name)
@@ -251,6 +256,37 @@ def score_robot_image(image_path: str, target_morph: str) -> dict:
           "potential":      { "score": <int 0-100>, "reason": "..." }
         }"""
 
+    guidance_detailed = """
+    SCORING RULES:
+
+        coherence  — How well does the morphology match the static target ({target_morph}) ?
+          0–29   = no recognizable similarity to a {target_morph}
+          30–49  = vague resemblance, very weak matching feature
+          50–69  = partial match, some features of {target_morph} are present
+          70–89  = some great resemblance, key features identifiable
+          90–100 = good match, structurally faithful to a {target_morph}
+
+        originality  — Is the structural design novel or inventive ?
+          0–29   = generic, indistinguishable from a randomly generated MuJoCo morphology
+          30–49  = basic organisation and minor variation on a standard body plan
+          50–69  = one interesting structural choice (unusual limb count, asymmetry, etc.)
+          70–89  = novel design with inventive features
+          90–100 = creative, unexpected but clever combination of structures
+
+        potential  — Is the structural design have some potential for further evolution toward the target ?
+          0–29   = completely off-topic, very far from target, hopeless
+          30–49  = very poor design, hard to tweak toward the target
+          50–69  = plausible but inefficient, long evolution needed
+          70–89  = design that could works, but needs improvement
+          90–100 = very interesting design able to evolve toward the target
+    """
+
+    guidance_empty = """
+    Score robot on this 3 criteria : coherence, originality, potential
+    """
+
+    guidance = guidance_detailed
+
     prompt = f"""
         ═══ CONTEXT ═══
 
@@ -280,28 +316,7 @@ def score_robot_image(image_path: str, target_morph: str) -> dict:
         Be conservative. Do not infer runtime behavior from a single frame. 
         Avoid OVERGRADING, let space for better morphology further improvement (A medium morphology cannot have more than ~60/100 in overall).
 
-        SCORING RULES:
-
-        coherence  — How well does the morphology match the static target ({target_morph}) ?
-          0–29   = no recognizable similarity to a {target_morph}
-          30–49  = vague resemblance, very weak matching feature
-          50–69  = partial match, some features of {target_morph} are present
-          70–89  = some great resemblance, key features identifiable
-          90–100 = good match, structurally faithful to a {target_morph}
-
-        originality  — Is the structural design novel or inventive ?
-          0–29   = generic, indistinguishable from a randomly generated MuJoCo morphology
-          30–49  = basic organisation and minor variation on a standard body plan
-          50–69  = one interesting structural choice (unusual limb count, asymmetry, etc.)
-          70–89  = novel design with inventive features
-          90–100 = creative, unexpected but clever combination of structures
-
-        potential  — Is the structural design have some potential for further evolution toward the target ?
-          0–29   = completely off-topic, very far from target, hopeless
-          30–49  = very poor design, hard to tweak toward the target
-          50–69  = plausible but inefficient, long evolution needed
-          70–89  = design that could works, but needs improvement
-          90–100 = very interesting design able to evolve toward the target
+        {guidance}
 
         ═══ OUTPUT FORMAT ═══
         Respond ONLY with valid JSON, no text before or after:
@@ -356,7 +371,7 @@ if __name__ == "__main__":
     # print(f"  Potential        : {resp.get('potential')}")
     # print(f"  Overall        : {round((1.0 * float(resp.get('coherence')['score']) + 0.5 * float(resp.get('originality')['score']) + 1.5 * float(resp.get('potential')['score'])) / 3, 0)}")
 
-    resp = score_robot_image("./img/morph_car_good.png", "a simple toy car")
+    resp = score_robot_image("./img/morph_car_bad.png", "a simple toy car")
     print("✅ Scores :")
     print(f"  Observation     : {resp.get('observation')}")
     print(f"  Interpretation  : {resp.get('interpretation')}")

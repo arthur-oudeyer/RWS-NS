@@ -143,11 +143,11 @@ def build_descriptor_section(items: list) -> str:
 def get_reference_section() -> str:
     return """═══ REFERENCE VIDEO ═══
 
-    The first video labeled "reference" shows the CURRENT BEST-PERFORMING controller
+    The first video labeled "reference" shows the CURRENT highest fitness controller
     from the previous generation. It is provided as a contextual baseline ONLY.
     — Do NOT score the reference. Do NOT include "reference" as a key in your JSON output.
-    Use the reference to better identify and reward genuine behavioural novelty and real
-    improvement over it. The reference is not a "good" solution, just a point of comparison that can be outperformed.
+    Use the reference to better identify and reward genuine behavioural novelty and
+    improvement over it. The reference is not a "good" solution, just a point of comparison that can be outperformed, it is very likely to be outperformed by the current new mutated individuals.
     """
 
 def get_fake_answer() -> str:

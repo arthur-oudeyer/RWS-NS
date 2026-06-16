@@ -201,7 +201,7 @@ class ExperimentConfig:
     # generation 1 onward (gen 0 has no best yet), so this gives exactly the
     # "build the prompt with the reference video if it's not the first
     # generation" behaviour.
-    reference_best_in_batch: bool = False
+    reference_best_in_batch: bool = True
 
     # Use synthetic VLM responses (no network / no API cost) for wiring tests.
     use_fake_grader: bool = False
