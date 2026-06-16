@@ -1,0 +1,60 @@
+========================================================================
+  RUN SUMMARY
+========================================================================
+run_id          : run_2026-06-15_14h59m06s
+status          : completed
+target          : 'a high jumping robot'
+strategy        : map_elite   (mu=1, lambda=12)
+init population : 20
+generations     : 4
+steps / train   : init(gen0)=5,000,000   warm(children)=2,500,000
+VLM grader      : gemini-3-flash-preview  n_score_request=3  batch=10
+individuals eval: 68
+total run time  : 1h 57m 25s
+
+------------------------------------------------------------------------
+  RUN HEALTH
+------------------------------------------------------------------------
+failed / wrong VLM answers : 0 / 68
+zero-fitness individuals   : 1 / 68
+
+------------------------------------------------------------------------
+  MAP-ELITES GRID
+------------------------------------------------------------------------
+descriptor cfg  : coordination_amplitude  axes=['coordination', 'amplitude']
+cells filled    : 7 / 12
+  coordination=uncoordinated / amplitude=minimal fitness=+0.1661  id=41
+  coordination=uncoordinated / amplitude=small fitness=+0.3228  id=25
+  coordination=partial / amplitude=minimal     fitness=+0.3667  id=16
+  coordination=partial / amplitude=small       fitness=+0.5233  id=54
+  coordination=partial / amplitude=large       fitness=+0.5450  id=55
+  coordination=coordinated / amplitude=large   fitness=+0.6528  id=10
+  coordination=coordinated / amplitude=extreme fitness=+0.6472  id=13
+
+------------------------------------------------------------------------
+  BEST INDIVIDUAL
+------------------------------------------------------------------------
+id            : 10
+generation    : 0
+parent_id     : None
+fitness       : +0.6528
+raw scores    : coherence=0.683  originality=0.600  potential=0.650
+score spread  : std=0.0668 over 3 requests  samples=[0.7, 0.7, 0.5583]
+policy params : results/run_2026-06-15_14h59m06s/policies/id000010.params
+video (mp4)   : results/run_2026-06-15_14h59m06s/videos/gen0000_id000010.mp4
+observation   : The robot, composed of a white torso, three colored legs, and a blue neck with a green head, begins in a low stance and immediately pushes off with its legs, launching its body into the air before tumbling.
+interpretation: The robot exhibits a clear jumping intent by contracting and then rapidly extending its limbs to generate upward momentum, though the landing is uncontrolled.
+  coherence   : The robot performs a clear jumping motion at the start of the rollout, demonstrating a goal-oriented action.
+  originality : It uses its multiple legs in sync to create a vertical push, which is a standard but effective approach.
+  potential   : The initial burst shows high potential for powerful jumping if stabilization during flight and landing is improved.
+
+------------------------------------------------------------------------
+  TOP 5 INDIVIDUALS
+------------------------------------------------------------------------
+  #1  id=10   gen=0   parent=None  fitness=+0.6528  (coh=0.68 orig=0.60 pot=0.65)
+  #2  id=13   gen=0   parent=None  fitness=+0.6472  (coh=0.68 orig=0.62 pot=0.63)
+  #3  id=32   gen=2   parent=13  fitness=+0.6444  (coh=0.58 orig=0.65 pot=0.68)
+  #4  id=19   gen=0   parent=None  fitness=+0.5972  (coh=0.57 orig=0.60 pot=0.62)
+  #5  id=55   gen=3   parent=13  fitness=+0.5450  (coh=0.49 orig=0.65 pot=0.55)
+
+(full machine-readable record: individuals_log.jsonl  ·  raw VLM responses: vlm_responses.jsonl  ·  full terminal: log.txt)

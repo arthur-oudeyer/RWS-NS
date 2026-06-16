@@ -127,9 +127,31 @@ COORDINATION_AMPLITUDE = DescriptorConfig(
     ],
 )
 
+SIMILITUDE_FEELINGS = DescriptorConfig(
+    name  = "similitude_feeling",
+    items = [
+        DescriptorDim(
+            name        = "similitude",
+            description = "Does it move like something real ? animal / machine / nothing",
+            low_desc    = "0-33 -> Animal, 34-66 -> Machine, ",
+            high_desc   = "67-100 -> nothing special",
+            bins        = [33, 66],
+            bin_labels  = ["animal", "machine", "nothing"],
+        ),
+        DescriptorDim(
+            name        = "feeling",
+            description = "What feelings comes from this behavior ? sadness / neutral / happyness",
+            low_desc    = "sadness",
+            high_desc   = "happyness",
+            bins        = [33, 66],
+            bin_labels  = ["sadness", "neutral", "happyness"],
+        ),
+    ],
+)
+
 
 DESCRIPTOR_CONFIGS: dict = {
-    c.name: c for c in (COORDINATION_AMPLITUDE,)
+    c.name: c for c in (COORDINATION_AMPLITUDE, SIMILITUDE_FEELINGS)
 }
 
 

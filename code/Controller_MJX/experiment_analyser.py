@@ -83,6 +83,43 @@ def _read_jsonl(path: Path) -> list:
     return out
 
 
+def _read_target_text(run_dir: Path, config: dict) -> str:
+    """Resolve the actual target behaviour text for a run.
+
+    Prefers the per-run snapshot (run_dir/target.txt). Falls back to the
+    configured target_file resolved next to this package (for runs predating the
+    snapshot). Returns "" if neither is available.
+    """
+    snap = run_dir / "target.txt"
+    if snap.exists():
+        t = snap.read_text(encoding="utf-8").strip()
+        if t:
+            return t
+    # Older runs (no snapshot): the resolved target was printed into log.txt as
+    #   [experiment_mjx] Target (target.txt): 'a high jumping robot'
+    # This is run-specific and accurate even if the package target.txt later changed.
+    log_txt = run_dir / "log.txt"
+    if log_txt.exists():
+        try:
+            for line in log_txt.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if "] Target (" in line and "): " in line:
+                    t = line.split("): ", 1)[1].strip().strip("'\"").strip()
+                    if t:
+                        return t
+        except Exception:
+            pass
+    target_file = config.get("target_file", "target.txt")
+    p = Path(target_file)
+    if not p.is_absolute():
+        p = Path(__file__).resolve().parent / p
+    try:
+        if p.exists():
+            return p.read_text(encoding="utf-8").strip()
+    except Exception:
+        pass
+    return ""
+
+
 def load_run(run_dir: Path) -> dict:
     """Load all available data from a run directory."""
     run_dir = Path(run_dir)
@@ -100,6 +137,11 @@ def load_run(run_dir: Path) -> dict:
     cfg_path = run_dir / "config.json"
     if cfg_path.exists():
         data["config"] = json.loads(cfg_path.read_text(encoding="utf-8"))
+
+    # Actual target behaviour: prefer the per-run snapshot (target.txt written by
+    # experiment_mjx); fall back to resolving the configured target_file next to
+    # this package for older runs that predate the snapshot.
+    data["config"]["target_behaviour"] = _read_target_text(run_dir, data["config"])
 
     data["log"] = _read_jsonl(run_dir / "log.jsonl")
 
@@ -481,10 +523,11 @@ def _build_general_info(run_data: dict) -> str:
             f"μ={cfg.get('mu','?')}  λ={cfg.get('lambda_','?')}  "
             f"gens={cfg.get('n_generations','?')}",
         ]
+    target = cfg.get("target_behaviour") or cfg.get("prompt_name", "?")
     lines += [
         f"Grader:    {cfg.get('gemini_model','?')}  "
         f"n_score={cfg.get('n_score_request','?')}",
-        f"Target:    {cfg.get('prompt_name','?')}",
+        f"Target:    {target}",
         f"Seed:      {cfg.get('seed','?')}",
         "",
         f"Gens done:     {n_done}",

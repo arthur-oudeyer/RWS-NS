@@ -1,0 +1,162 @@
+
+======================================================================
+[log started 2026-06-15 13:56:17]
+======================================================================
+
+============================================================
+
+ExperimentConfig: run_2026-06-15_13h56m17s
+  strategy     : map_elite
+  population   : λ=3  σ=0  generations=1  descriptors=coordination_amplitude
+  init pop     : 3 individuals trained from scratch (gen 0)
+  PPO          : init=5,000,000  warm=2,500,000  envs=2048  arch=[256, 256]
+  episode      : 4.0s  ctrl_freq=20 Hz  fall_h=0.1 m
+  reward σ     : init=1.5  mut=0.5
+  reward defaults : {'forward_velocity': 0.05, 'lateral_drift': 0.1, 'upright_bonus': 0.1, 'energy_penalty': 0.02, 'contact_reward': 0.02, 'alive_bonus': 0.01, 'fall_penalty': 10.0, 'no_contact_reward': 0.02, 'torso_height_reward': 0.05, 'torso_rotation_reward': 0.05, 'torso_tilting_speed_reward': 0.02, 'limb_coordination_reward': 0.05, 'nervosity_reward': 0.02, 'smooth_reward': 0.05, 'vertical_velocity_reward': 0.02, 'lateral_velocity_reward': 0.05, 'joint_range_reward': 0.03, 'height_target_reward': 2.0, 'tilt_penalty': 0.02, 'tilt_rate_penalty': 0.005, 'all_feet_planted_bonus': 0.01, 'vertical_velocity_penalty': 0.01, 'horizontal_velocity_penalty': 0.01}
+  video        : 288×288  20 fps  track_torso=False
+  grader       : gemini-3-flash-preview  batch=10  n_score_request=3  fake=False  reference=True
+  target file  : target.txt
+  output       : results/run_2026-06-15_13h56m17s  (archive every 1 gen)
+============================================================
+
+[experiment_mjx] Building grader …
+[experiment_mjx] MAP-Elites descriptors: coordination_amplitude → ['coordination', 'amplitude']
+[experiment_mjx] Target (target.txt): 'a high jumping robot'
+[experiment_mjx] Grader ready (LocomotionGrader).
+[evolution_mjx] Building MJX template env config (model compile) …
+[evolution_mjx] Template config ready.
+[experiment_mjx] Archive + evolution ready (map_elite).
+
+[experiment_mjx] Initial population — 3 individuals.
+
+  [init 1/3] training id=0 from scratch (5,000,000 steps) …        update 1/76  steps=65,536  fps=5,291  rw=+27.602  π=-0.001  V=1567.5  ent=4.600
+        update 5/76  steps=327,680  fps=18,621  rw=+27.811  π=+0.002  V=1320.0  ent=4.644
+        update 9/76  steps=589,824  fps=25,889  rw=+27.407  π=-0.001  V=1617.9  ent=4.538
+        update 13/76  steps=851,968  fps=30,474  rw=+26.701  π=-0.004  V=1688.1  ent=4.412
+        update 17/76  steps=1,114,112  fps=33,583  rw=+26.098  π=-0.005  V=1607.5  ent=4.260
+        update 21/76  steps=1,376,256  fps=35,855  rw=+25.688  π=-0.004  V=1331.8  ent=4.126
+        update 25/76  steps=1,638,400  fps=37,518  rw=+25.825  π=-0.003  V=1100.2  ent=4.017
+        update 29/76  steps=1,900,544  fps=38,828  rw=+26.146  π=-0.000  V=792.2  ent=3.905
+        update 33/76  steps=2,162,688  fps=39,860  rw=+26.367  π=-0.001  V=537.3  ent=3.815
+        update 37/76  steps=2,424,832  fps=40,730  rw=+27.454  π=-0.001  V=432.3  ent=3.735
+        update 41/76  steps=2,686,976  fps=41,476  rw=+28.082  π=-0.002  V=416.1  ent=3.639
+        update 45/76  steps=2,949,120  fps=42,111  rw=+29.069  π=+0.001  V=424.6  ent=3.575
+        update 49/76  steps=3,211,264  fps=42,670  rw=+29.624  π=+0.001  V=428.3  ent=3.504
+        update 53/76  steps=3,473,408  fps=43,158  rw=+30.340  π=+0.003  V=355.2  ent=3.454
+        update 57/76  steps=3,735,552  fps=43,598  rw=+30.913  π=+0.002  V=354.5  ent=3.388
+        update 61/76  steps=3,997,696  fps=43,975  rw=+30.531  π=+0.006  V=255.9  ent=3.301
+        update 65/76  steps=4,259,840  fps=44,308  rw=+30.899  π=+0.000  V=263.5  ent=3.204
+        update 69/76  steps=4,521,984  fps=44,626  rw=+31.558  π=+0.001  V=265.7  ent=3.129
+        update 73/76  steps=4,784,128  fps=44,912  rw=+32.053  π=+0.001  V=271.0  ent=3.071
+        update 76/76  steps=4,980,736  fps=45,107  rw=+32.140  π=+0.004  V=243.5  ent=3.006
+
+  [init 1/3] rendering id=0 …/itf-fi-ml/home/arthuo/.conda/envs/mjx/lib/python3.11/subprocess.py:1885: RuntimeWarning: os.fork() was called. os.fork() is incompatible with multithreaded code, and JAX is multithreaded, so this will likely lead to a deadlock.
+  self.pid = _fork_exec(
+
+  [init 1/3] id=0 done in 134.5s  fitness=31.999
+
+  [init 2/3] training id=1 from scratch (5,000,000 steps) …        update 1/76  steps=65,536  fps=6,606  rw=+1.974  π=+0.007  V=29.7  ent=4.588
+        update 5/76  steps=327,680  fps=21,593  rw=+1.923  π=-0.005  V=43.3  ent=4.498
+        update 9/76  steps=589,824  fps=28,710  rw=+1.951  π=+0.001  V=83.9  ent=4.403
+        update 13/76  steps=851,968  fps=32,781  rw=+2.005  π=-0.005  V=75.2  ent=4.289
+        update 17/76  steps=1,114,112  fps=35,348  rw=+2.058  π=-0.005  V=41.3  ent=4.184
+        update 21/76  steps=1,376,256  fps=37,082  rw=+2.111  π=-0.001  V=17.3  ent=4.053
+        update 25/76  steps=1,638,400  fps=38,363  rw=+2.155  π=+0.003  V=8.9  ent=3.851
+        update 29/76  steps=1,900,544  fps=39,355  rw=+2.248  π=+0.001  V=5.8  ent=3.624
+        update 33/76  steps=2,162,688  fps=40,214  rw=+2.364  π=+0.001  V=5.4  ent=3.387
+        update 37/76  steps=2,424,832  fps=40,990  rw=+2.484  π=-0.001  V=4.9  ent=3.141
+        update 41/76  steps=2,686,976  fps=41,685  rw=+2.581  π=+0.012  V=3.8  ent=2.875
+        update 45/76  steps=2,949,120  fps=42,302  rw=+2.645  π=-0.003  V=2.7  ent=2.688
+        update 49/76  steps=3,211,264  fps=42,870  rw=+2.694  π=+0.001  V=1.9  ent=2.449
+        update 53/76  steps=3,473,408  fps=43,341  rw=+2.736  π=-0.004  V=0.9  ent=2.207
+        update 57/76  steps=3,735,552  fps=43,753  rw=+2.760  π=+0.016  V=0.7  ent=1.906
+        update 61/76  steps=3,997,696  fps=44,055  rw=+2.779  π=+0.007  V=0.7  ent=1.702
+        update 65/76  steps=4,259,840  fps=44,345  rw=+2.791  π=-0.003  V=0.8  ent=1.536
+        update 69/76  steps=4,521,984  fps=44,619  rw=+2.806  π=-0.002  V=0.6  ent=1.333
+        update 73/76  steps=4,784,128  fps=44,791  rw=+2.792  π=+0.051  V=1.0  ent=1.120
+        update 76/76  steps=4,980,736  fps=44,900  rw=+2.810  π=-0.004  V=0.3  ent=0.948
+
+  [init 2/3] rendering id=1 …
+  [init 2/3] id=1 done in 112.9s  fitness=2.807
+
+  [init 3/3] training id=2 from scratch (5,000,000 steps) …        update 1/76  steps=65,536  fps=6,145  rw=+2.791  π=+0.008  V=106.5  ent=4.603
+        update 5/76  steps=327,680  fps=20,351  rw=+2.524  π=-0.004  V=99.3  ent=4.560
+        update 9/76  steps=589,824  fps=27,298  rw=+2.793  π=-0.003  V=79.6  ent=4.476
+        update 13/76  steps=851,968  fps=31,367  rw=+2.874  π=-0.004  V=46.7  ent=4.372
+        update 17/76  steps=1,114,112  fps=34,095  rw=+2.925  π=-0.005  V=27.4  ent=4.226
+        update 21/76  steps=1,376,256  fps=36,070  rw=+2.962  π=+0.001  V=14.9  ent=4.125
+        update 25/76  steps=1,638,400  fps=37,511  rw=+2.993  π=+0.011  V=9.2  ent=4.016
+        update 29/76  steps=1,900,544  fps=38,660  rw=+3.024  π=+0.001  V=10.1  ent=3.899
+        update 33/76  steps=2,162,688  fps=39,560  rw=+3.053  π=+0.003  V=7.9  ent=3.746
+        update 37/76  steps=2,424,832  fps=40,298  rw=+3.095  π=-0.001  V=8.2  ent=3.546
+        update 41/76  steps=2,686,976  fps=40,917  rw=+3.114  π=+0.003  V=7.8  ent=3.335
+        update 45/76  steps=2,949,120  fps=41,432  rw=+3.165  π=-0.003  V=7.0  ent=3.116
+        update 49/76  steps=3,211,264  fps=41,876  rw=+3.218  π=-0.001  V=6.4  ent=2.941
+        update 53/76  steps=3,473,408  fps=42,261  rw=+3.273  π=+0.014  V=5.1  ent=2.749
+        update 57/76  steps=3,735,552  fps=42,603  rw=+3.324  π=+0.004  V=5.9  ent=2.564
+        update 61/76  steps=3,997,696  fps=42,915  rw=+3.381  π=+0.000  V=5.9  ent=2.370
+        update 65/76  steps=4,259,840  fps=43,202  rw=+3.496  π=-0.002  V=6.8  ent=2.207
+        update 69/76  steps=4,521,984  fps=43,468  rw=+3.604  π=-0.001  V=9.1  ent=2.016
+        update 73/76  steps=4,784,128  fps=43,715  rw=+3.751  π=-0.003  V=18.5  ent=1.887
+        update 76/76  steps=4,980,736  fps=43,889  rw=+3.782  π=-0.003  V=23.9  ent=1.804
+
+  [init 3/3] rendering id=2 …
+  [init 3/3] id=2 done in 115.1s  fitness=3.784
+[vlm_grader] ERROR: batch request failed after retries (503 Service Unavailable. {'message': '', 'status': 'Service Unavailable'}); assigning fitness 0.0 to ['robot_0', 'robot_1', 'robot_2'].
+[gen   0 / 1]  init      pool_n=3    best=(+0.7825, 2)  mean=+0.4586  510.1s  cells=3
+
+  [step] 1/3 gen=1 id=3 warm-start 2,500,000 steps …        update 1/38  steps=65,536  fps=6,477  rw=+0.997  π=+0.007  V=7.1  ent=0.912
+        update 5/38  steps=327,680  fps=21,295  rw=+1.194  π=+0.007  V=7.0  ent=0.844
+        update 9/38  steps=589,824  fps=28,541  rw=+1.200  π=-0.001  V=0.5  ent=0.763
+        update 13/38  steps=851,968  fps=32,847  rw=+0.973  π=+0.002  V=1.5  ent=0.684
+        update 17/38  steps=1,114,112  fps=35,577  rw=+1.204  π=+0.006  V=0.2  ent=0.566
+        update 21/38  steps=1,376,256  fps=37,399  rw=+1.028  π=-0.004  V=0.4  ent=0.416
+        update 25/38  steps=1,638,400  fps=38,796  rw=+1.222  π=-0.005  V=0.1  ent=0.248
+        update 29/38  steps=1,900,544  fps=39,883  rw=+1.228  π=-0.004  V=0.1  ent=0.072
+        update 33/38  steps=2,162,688  fps=40,704  rw=+1.084  π=+0.001  V=0.2  ent=-0.149
+        update 37/38  steps=2,424,832  fps=41,340  rw=+1.251  π=-0.001  V=0.1  ent=-0.419
+        update 38/38  steps=2,490,368  fps=41,495  rw=+1.113  π=-0.007  V=0.2  ent=-0.474
+
+  [step] 1/3 id=3 done in 62.1s  fitness=1.182
+
+  [step] 2/3 gen=1 id=4 warm-start 2,500,000 steps …        update 1/38  steps=65,536  fps=6,292  rw=+2.270  π=+0.012  V=24.6  ent=1.779
+        update 5/38  steps=327,680  fps=20,740  rw=+2.201  π=-0.002  V=11.7  ent=1.668
+        update 9/38  steps=589,824  fps=27,886  rw=+2.275  π=+0.001  V=7.0  ent=1.522
+        update 13/38  steps=851,968  fps=32,095  rw=+2.279  π=-0.001  V=3.4  ent=1.341
+        update 17/38  steps=1,114,112  fps=34,861  rw=+2.334  π=-0.000  V=4.3  ent=1.138
+        update 21/38  steps=1,376,256  fps=36,820  rw=+2.360  π=+0.003  V=4.6  ent=0.959
+        update 25/38  steps=1,638,400  fps=38,278  rw=+2.364  π=-0.003  V=3.9  ent=0.850
+        update 29/38  steps=1,900,544  fps=39,389  rw=+2.395  π=+0.002  V=4.3  ent=0.712
+        update 33/38  steps=2,162,688  fps=40,285  rw=+2.404  π=+0.002  V=3.0  ent=0.572
+        update 37/38  steps=2,424,832  fps=41,002  rw=+2.430  π=+0.001  V=2.6  ent=0.394
+        update 38/38  steps=2,490,368  fps=41,147  rw=+2.417  π=+0.003  V=1.8  ent=0.346
+
+  [step] 2/3 id=4 done in 62.5s  fitness=2.424
+
+  [step] 3/3 gen=1 id=5 warm-start 2,500,000 steps …        update 1/38  steps=65,536  fps=6,350  rw=+26.748  π=+0.011  V=223.7  ent=2.998
+        update 5/38  steps=327,680  fps=21,052  rw=+27.321  π=+0.002  V=225.7  ent=2.952
+        update 9/38  steps=589,824  fps=28,310  rw=+27.410  π=+0.002  V=297.9  ent=2.909
+        update 13/38  steps=851,968  fps=32,697  rw=+27.531  π=+0.002  V=189.9  ent=2.858
+        update 17/38  steps=1,114,112  fps=35,607  rw=+27.573  π=+0.001  V=229.3  ent=2.809
+        update 21/38  steps=1,376,256  fps=37,692  rw=+27.699  π=+0.005  V=207.3  ent=2.740
+        update 25/38  steps=1,638,400  fps=39,259  rw=+27.762  π=+0.005  V=211.4  ent=2.688
+        update 29/38  steps=1,900,544  fps=40,432  rw=+27.888  π=+0.002  V=244.8  ent=2.640
+        update 33/38  steps=2,162,688  fps=41,408  rw=+28.206  π=+0.003  V=223.8  ent=2.572
+        update 37/38  steps=2,424,832  fps=42,187  rw=+28.392  π=+0.004  V=226.1  ent=2.511
+        update 38/38  steps=2,490,368  fps=42,351  rw=+28.488  π=+0.002  V=225.2  ent=2.512
+
+  [step] 3/3 id=5 done in 60.7s  fitness=28.440
+[gen   1 / 1]  step      pool_n=3    best=(+0.7825, 2)  mean=+0.4056  293.7s  cells=5
+
+[experiment_mjx] Done. Final archive → results/run_2026-06-15_13h56m17s/archive_final.json
+[experiment_mjx] Summary → results/run_2026-06-15_13h56m17s/SUMMARY.txt
+
+── MapEliteArchive  dims=['coordination', 'amplitude'] ──
+  Filled cells : 5
+  Best overall : id=2  fitness=+0.7825  cell=coordination=coordinated / amplitude=extreme
+    coordination=uncoordinated / amplitude=minimal  fitness=+0.0500  id=1
+    coordination=partial / amplitude=small    fitness=+0.3706  id=3
+    coordination=partial / amplitude=large    fitness=+0.5061  id=5
+    coordination=coordinated / amplitude=large  fitness=+0.5433  id=0
+    coordination=coordinated / amplitude=extreme  fitness=+0.7825  id=2
+  Last gen     : gen=   1  evaluated=   3  best=+0.7825  mean=+0.4056  std=0.0884  best_id=2

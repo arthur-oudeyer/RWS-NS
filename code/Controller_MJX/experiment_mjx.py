@@ -194,6 +194,24 @@ def _load_descriptor_config(cfg: ExperimentConfig):
     return get_descriptor_config(cfg.descriptor_config_name)
 
 
+def _snapshot_target(cfg: ExperimentConfig, run_dir: Path) -> None:
+    """Persist the resolved target behaviour into the run dir.
+
+    The target lives in an editable text file (cfg.target_file), so config.json
+    only records the file path + a short label (prompt_name). Snapshotting the
+    actual text makes each run self-describing — the analyser shows the real
+    target instead of just the label, even if target.txt later changes.
+    """
+    try:
+        text = _read_target_behaviour(cfg)
+    except Exception:
+        return
+    try:
+        (run_dir / "target.txt").write_text(text + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _make_grader(cfg: ExperimentConfig):
     if cfg.grader_type != "gemini":
         raise NotImplementedError(f"grader_type={cfg.grader_type!r} not supported (VLM only).")
@@ -521,6 +539,7 @@ def run_mjx(
     run_start      = time.time()
 
     cfg.save(str(run_dir / "config.json"))
+    _snapshot_target(cfg, run_dir)
     print(f"\n{'=' * 60}")
     cfg.describe()
     print(f"{'=' * 60}\n")
@@ -589,6 +608,7 @@ def resume_mjx(run_dir: Union[str, Path], grader=None):
     cfg            = ExperimentConfig.load(str(run_dir / "config.json"))
     log_path       = run_dir / "log.jsonl"
     indiv_log_path = run_dir / "individuals_log.jsonl"
+    _snapshot_target(cfg, run_dir)
 
     snapshots = sorted(run_dir.glob("archive_gen*.json"))
     if not snapshots:

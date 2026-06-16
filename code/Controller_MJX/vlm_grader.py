@@ -216,10 +216,17 @@ class LocomotionGrader:
             try:
                 text = self._score_chunk_remote(chunk, ids, reference_video, dbg)
             except Exception as e:
-                # Retries already exhausted inside _score_chunk_remote — degrade
-                # this chunk to fitness 0.0 so the whole run survives the outage.
-                print(f"[vlm_grader] ERROR: batch request failed after retries "
-                      f"({e}); assigning fitness 0.0 to {ids}.", flush=True)
+                # Retries already exhausted inside _score_chunk_remote. This single
+                # scoring attempt degrades to 0.0 so the run survives the outage.
+                # With n_score_request > 1 this attempt is DROPPED from the average
+                # (see _average_outputs) — the final fitness only stays 0.0 if every
+                # attempt fails. The message reflects that to avoid false alarm.
+                note = (f"this is 1 of {self._n_score_request} scoring attempts; it "
+                        f"will be excluded from the average if another succeeds"
+                        if self._n_score_request > 1
+                        else "single scoring attempt — final fitness will be 0.0")
+                print(f"[vlm_grader] WARNING: batch scoring attempt failed after "
+                      f"retries ({e}); {note}. Affected: {ids}.", flush=True)
                 return {vid: self._fallback_output(f"api_error: {e}") for vid in ids}
 
         try:

@@ -65,7 +65,7 @@ class ExperimentConfig:
     run_id:        str = ""
     seed:          int = 14
     description:   str = ""
-    strategy:      str = "mu_lambda"   # "mu_lambda" | "map_elite"
+    strategy:      str = "map_elite"   # "mu_lambda" | "map_elite"
 
     # ---- Population ---------------------------------------------------------
     mu:            int = 1
@@ -123,9 +123,9 @@ class ExperimentConfig:
     jax_backend:  str = "metal"
 
     # ---- PPO inner loop -----------------------------------------------------
-    n_init_steps: int = 5_000_000      # from-scratch training budget (gen 0)
-    n_warm_steps: int = 2_500_000      # warm-start budget for mutated children
-    policy_arch:  list = field(default_factory=lambda: [256, 256])
+    n_init_steps: int = 4_000_000      # from-scratch training budget (gen 0)
+    n_warm_steps: int = 2_000_000      # warm-start budget for mutated children
+    policy_arch:  list = field(default_factory=lambda: [128, 128])
     learning_rate:    float = 3e-4
     gamma:            float = 0.99
     gae_lambda:       float = 0.95
@@ -153,8 +153,8 @@ class ExperimentConfig:
 
     # ---- Video / VLM render -------------------------------------------------
     video_fps:           int  = 20
-    render_width:        int  = 288   # per-camera; total video width = 2 × this
-    render_height:       int  = 288
+    render_width:        int  = 360   # per-camera; total video width = 2 × this
+    render_height:       int  = 360
     camera_track_torso:  bool = False
 
     # Origin tile — colored marker at (0,0) so the VLM can gauge displacement.
@@ -176,7 +176,7 @@ class ExperimentConfig:
     # The fitness scorer is always the Gemini VLM grader (vlm_grader.py).
     grader_type:    str = "gemini"
     gemini_model:   str = "gemini-3-flash-preview"
-    batching:       int = 10           # videos per Gemini request (batch size)
+    batching:       int = 8           # videos per Gemini request (batch size)
     # The VLM score has high variance between identical requests. Scoring each
     # batch n_score_request times and averaging the per-dimension scores gives
     # a more consistent fitness. 1 = single request (no averaging).
@@ -201,7 +201,7 @@ class ExperimentConfig:
     # generation 1 onward (gen 0 has no best yet), so this gives exactly the
     # "build the prompt with the reference video if it's not the first
     # generation" behaviour.
-    reference_best_in_batch: bool = True
+    reference_best_in_batch: bool = False
 
     # Use synthetic VLM responses (no network / no API cost) for wiring tests.
     use_fake_grader: bool = False
@@ -209,7 +209,7 @@ class ExperimentConfig:
     # MAP-Elites feature space (see descriptor.py). Used only by strategy="map_elite";
     # ignored by mu_lambda. Selects which 2-D behavioural axes the VLM scores and the
     # grid diversifies over. "" disables descriptors (collapses to a single cell).
-    descriptor_config_name: str = "coordination_amplitude"
+    descriptor_config_name: str = "similitude_feeling"
 
     # ---- Output -------------------------------------------------------------
     output_dir:            str  = "results"

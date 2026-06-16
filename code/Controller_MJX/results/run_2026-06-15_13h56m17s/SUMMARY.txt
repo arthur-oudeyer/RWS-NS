@@ -1,0 +1,58 @@
+========================================================================
+  RUN SUMMARY
+========================================================================
+run_id          : run_2026-06-15_13h56m17s
+status          : completed
+target          : 'a high jumping robot'
+strategy        : map_elite   (mu=1, lambda=3)
+init population : 3
+generations     : 1
+steps / train   : init(gen0)=5,000,000   warm(children)=2,500,000
+VLM grader      : gemini-3-flash-preview  n_score_request=3  batch=10
+individuals eval: 6
+total run time  : 13m 25s
+
+------------------------------------------------------------------------
+  RUN HEALTH
+------------------------------------------------------------------------
+failed / wrong VLM answers : 0 / 6
+zero-fitness individuals   : 0 / 6
+
+------------------------------------------------------------------------
+  MAP-ELITES GRID
+------------------------------------------------------------------------
+descriptor cfg  : coordination_amplitude  axes=['coordination', 'amplitude']
+cells filled    : 5 / 12
+  coordination=uncoordinated / amplitude=minimal fitness=+0.0500  id=1
+  coordination=partial / amplitude=small       fitness=+0.3706  id=3
+  coordination=partial / amplitude=large       fitness=+0.5061  id=5
+  coordination=coordinated / amplitude=large   fitness=+0.5433  id=0
+  coordination=coordinated / amplitude=extreme fitness=+0.7825  id=2
+
+------------------------------------------------------------------------
+  BEST INDIVIDUAL
+------------------------------------------------------------------------
+id            : 2
+generation    : 0
+parent_id     : None
+fitness       : +0.7825
+raw scores    : coherence=0.865  originality=0.610  potential=0.785
+score spread  : std=0.0242 over 2 requests  samples=[0.7583, 0.8067]
+policy params : results/run_2026-06-15_13h56m17s/policies/id000002.params
+video (mp4)   : results/run_2026-06-15_13h56m17s/videos/gen0000_id000002.mp4
+observation   : The robot starts in a concentrated crouch and executes a powerful vertical push. All three legs extend rapidly, lifting the torso high into the air. At the peak of the jump, the robot is completely airborne. It then begins to descend, rotating slightly and landing awkwardly on its neck and head area.
+interpretation: This robot successfully performs a high jump. It demonstrates the necessary coordination to convert leg power into vertical height. Although the landing is uncontrolled, the primary goal of jumping high is clearly met.
+  coherence   : The robot achieves a clear, high jump with a repeatable explosive pattern. The intention and result are perfectly aligned with the target behavior.
+  originality : The 'pogo-stick' style jump using all legs simultaneously is a very effective and clear solution to the task.
+  potential   : The coordination and power generation are excellent. With improved landing or stabilization, this pattern has great potential for high-performance locomotion.
+
+------------------------------------------------------------------------
+  TOP 5 INDIVIDUALS
+------------------------------------------------------------------------
+  #1  id=2    gen=0   parent=None  fitness=+0.7825  (coh=0.86 orig=0.61 pot=0.79)
+  #2  id=0    gen=0   parent=None  fitness=+0.5433  (coh=0.58 orig=0.44 pot=0.55)
+  #3  id=5    gen=1   parent=0  fitness=+0.5061  (coh=0.50 orig=0.50 pot=0.51)
+  #4  id=3    gen=1   parent=1  fitness=+0.3706  (coh=0.37 orig=0.36 pot=0.37)
+  #5  id=4    gen=1   parent=2  fitness=+0.3400  (coh=0.34 orig=0.34 pot=0.34)
+
+(full machine-readable record: individuals_log.jsonl  ·  raw VLM responses: vlm_responses.jsonl  ·  full terminal: log.txt)
