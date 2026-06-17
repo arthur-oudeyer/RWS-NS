@@ -63,7 +63,7 @@ class ExperimentConfig:
 
     # ---- Identity -----------------------------------------------------------
     run_id:        str = ""
-    seed:          int = 14
+    seed:          int = 0
     description:   str = ""
     strategy:      str = "map_elite"   # "mu_lambda" | "map_elite"
 
@@ -112,8 +112,8 @@ class ExperimentConfig:
     # Mutation σ for the per-generation log-normal noise on each weight.
     # σ_init is used to widen the *initial* population around the default
     # vector so gen-0 individuals do not all collapse to the same prior.
-    reward_mutation_sigma:     float = 0.5
-    reward_init_sigma:         float = 1.5
+    reward_mutation_sigma:     float = 0.6
+    reward_init_sigma:         float = 1.6
 
     # ---- MJX / JAX backend ---------------------------------------------------
     # Number of parallel environments vectorised via jax.vmap.
@@ -209,7 +209,7 @@ class ExperimentConfig:
     # MAP-Elites feature space (see descriptor.py). Used only by strategy="map_elite";
     # ignored by mu_lambda. Selects which 2-D behavioural axes the VLM scores and the
     # grid diversifies over. "" disables descriptors (collapses to a single cell).
-    descriptor_config_name: str = "similitude_feeling"
+    descriptor_config_name: str = "energy_abstraction"
 
     # ---- Output -------------------------------------------------------------
     output_dir:            str  = "results"

@@ -149,9 +149,30 @@ SIMILITUDE_FEELINGS = DescriptorConfig(
     ],
 )
 
+ENERGY_ABSTRACTION = DescriptorConfig(
+    name  = "energy_abstraction",
+    items = [
+        DescriptorDim(
+            name        = "energy",
+            description = "How energetic the limb movements are ?",
+            low_desc    = "almost static, slow and smooth movements",
+            high_desc   = "very excited, dynamic, energetic and intensive movements",
+            bins        = [20, 40, 60, 75],
+            bin_labels  = ["almost static", "slow", "medium", "dynamic", "extremely energetic"],
+        ),
+        DescriptorDim(
+            name        = "abstraction",
+            description = "How abstract is this dance ?",
+            low_desc    = "Very expressive and interpretable, can easily be described",
+            high_desc   = "Low interpretability, high creativity, hard to put words describing the movements",
+            bins        = [33, 66],
+            bin_labels  = ["abstract", "medium", "down-to-earth"],
+        ),
+    ],
+)
 
 DESCRIPTOR_CONFIGS: dict = {
-    c.name: c for c in (COORDINATION_AMPLITUDE, SIMILITUDE_FEELINGS)
+    c.name: c for c in (COORDINATION_AMPLITUDE, SIMILITUDE_FEELINGS, ENERGY_ABSTRACTION)
 }
 
 
