@@ -75,12 +75,12 @@ class ExperimentConfig:
     run_id:          str = ""            # filled automatically if empty
     seed:            int = 21
     description:     str = ""
-    strategy:        str = "mu_lambda"   # "mu_lambda" | "map_elite"
+    strategy:        str = "map_elite"   # "mu_lambda" | "map_elite"
 
     # ---- Population ---------------------------------------------------------
     mu:              int = 5            # number of parents kept each generation
-    lambda_:         int = 17           # number of offspring produced each generation by mutating the previous generation
-    sigma:           int = 3            # number of fresh random morphologies injected each generation
+    lambda_:         int = 20           # number of offspring produced each generation by mutating the previous generation
+    sigma:           int = 0            # number of fresh random morphologies injected each generation
     n_generations:   int = 10
 
     # Time estimation single call : 10 s * number of robot * generations
@@ -90,7 +90,7 @@ class ExperimentConfig:
     # init_population_size : number of random individuals evaluated at gen 0.
     #   mu_lambda  → defaults to mu  if 0
     #   map_elite  → defaults to max(mu, lambda_) * 2  if 0
-    init_population_size: int = 2 * (lambda_ + sigma)
+    init_population_size: int = 100 #2 * (lambda_ + sigma)
 
     # Range of leg count for randomly generated morphologies (structure, not count)
     init_n_legs_min: int = 1
@@ -100,12 +100,12 @@ class ExperimentConfig:
     init_n_mutation: int = 5
 
     # ---- Mutation -----------------------------------------------------------
-    length_std:       float = 0.1        # Gaussian std for segment length (m) (base length ~0.25)
-    angle_std:        float = 12.0        # Gaussian std for placement angle (deg) (angle pos torso / relative angle for swing axis for branched)
-    rest_angle_std:   float = 0.2        # Gaussian std for rest angle (rad) (1 ~ 58°)
+    length_std:       float = 0.08        # Gaussian std for segment length (m) (base length ~0.25)
+    angle_std:        float = 10.0        # Gaussian std for placement angle (deg) (angle pos torso / relative angle for swing axis for branched)
+    rest_angle_std:   float = 0.2         # Gaussian std for rest angle (rad) (1 ~ 58°)
     add_remove_prob:  float = 0.5         # probability of adding or removing a leg
     allow_branching:  bool  = True        # whether mutation can create branched legs
-    branching_prob:   float = 0.6        # conditional prob of adding a branched leg
+    branching_prob:   float = 0.5         # conditional prob of adding a branched leg
     # Torso mutation (0.0 = keep fixed, i.e. torso shape/orientation unchanged)
     torso_a_std:      float = 0.05         # Gaussian std for torso X semi-axis (m)
     torso_b_std:      float = 0.05         # Gaussian std for torso Y semi-axis (m)
@@ -132,7 +132,7 @@ class ExperimentConfig:
     # Gemini as a labelled reference alongside each batch.  Gemini is instructed
     # NOT to score it but to use it as a baseline so it can reward genuine novelty
     # and real improvement rather than minor variants of the incumbent.
-    reference_best_in_batch: bool = False
+    reference_best_in_batch: bool = True
 
     # ---- Grader -------------------------------------------------------------
     grader_type: str = "gemini"  # "clip" | "gemini"
@@ -166,7 +166,7 @@ class ExperimentConfig:
     #                         (0 = disabled).  Saved to renders/best/gen{N:04d}.png
     # save_final_best       : always render and save the overall best at end of run.
     #                         Saved to renders/best_final.png
-    save_best_every_n_gen: int  = 1     # 0 to disable
+    save_best_every_n_gen: int  = 1    # 0 to disable
     save_final_best:       bool = True
     save_all_render_tmp:   bool = True # save all render temporarily for data analysis
 
