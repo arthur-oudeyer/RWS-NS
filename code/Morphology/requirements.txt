@@ -1,0 +1,14 @@
+# Morphology experiment dependencies (CPU/GPU remote run).
+# torch + torchvision are installed separately with a CUDA build:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# (pick the cuXXX matching `nvidia-smi` on the remote).
+
+mujoco
+numpy
+scipy
+Pillow
+open_clip_torch
+google-genai
+
+# Analyser / plotting only (local desktop, not needed on a headless remote):
+matplotlib

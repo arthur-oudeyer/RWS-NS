@@ -42,7 +42,6 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
-from sympy.strategies.core import switch
 
 import config as cfg
 
