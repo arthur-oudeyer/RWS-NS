@@ -47,7 +47,7 @@ import config as cfg
 
 # Maximum total legs allowed during mutation
 MAX_LEGS = 8
-MIN_LENGTH, MAX_LENGTH = 0.15, 0.5
+MIN_LENGTH, MAX_LENGTH = 0.15, 0.4
 
 
 # ---------------------------------------------------------------------------
@@ -58,8 +58,8 @@ MIN_LENGTH, MAX_LENGTH = 0.15, 0.5
 class JointDescriptor:
     """One rotational hinge joint on a leg segment."""
     damping:    float               = 4.0
-    kp:         float               = 25.0           # position servo stiffness (N·m/rad)
-    ctrl_range: tuple[float, float] = (-1.5, 0.8)    # actuator limits (radians)
+    kp:         float               = 25.0            # position servo stiffness (N·m/rad)
+    ctrl_range: tuple[float, float] = (-3.92, 0.78)   # actuator limits (radians)
     length:     float               = 0.25            # segment length below this joint (m)
     radius:     float               = 0.025           # capsule radius (m)
     rgba:       tuple               = (0.5, 0.5, 0.5, 1.0)
@@ -427,7 +427,7 @@ def NewMorph(
                  float(np.random.uniform(0.2, 0.9)),
                  1.0)
         length      = float(np.random.uniform(MIN_LENGTH, MAX_LENGTH))
-        rest_angle  = float(np.random.uniform(-0.6, 0.4))   # within typical ctrl_range
+        rest_angle  = float(np.random.uniform(-3.91, 0.77))   # within typical ctrl_range
         legs.append(LegDescriptor(angle, [JointDescriptor(rgba=color, length=length, rest_angle=rest_angle)]))
 
     morph = RobotMorphology(name=name, legs=legs, torso_a=torso_a)

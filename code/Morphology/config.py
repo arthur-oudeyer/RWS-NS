@@ -44,8 +44,8 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 
 DEFAULT_CAMERA_VIEWS = [
-    {"azimuth": 0,   "elevation": 5, "distance": 2., "lookat": [0.0, 0.0, 0.25]},
-    {"azimuth": 45, "elevation": -50, "distance": 2., "lookat": [0.0, 0.0, 0.25]},
+    {"azimuth": 0,   "elevation": 0, "distance": 3., "lookat": [0.0, 0.0, 0.25]},
+    {"azimuth": 45, "elevation": -50, "distance": 3., "lookat": [0.0, 0.0, 0.25]},
 ]
 
 # ---------------------------------------------------------------------------
@@ -120,8 +120,8 @@ class ExperimentConfig:
     body_part_leg_prob:        float = 0.5  # when adding a leg, prob of attaching to a body part
 
     # ---- Rendering ----------------------------------------------------------
-    render_width:    int   = 192
-    render_height:   int   = 192
+    render_width:    int   = 360
+    render_height:   int   = 360
     camera_views:    list  = field(default_factory=lambda: list(DEFAULT_CAMERA_VIEWS))
     floor_clearance: float = 0   # metres of clearance above z=0 (auto spawn-height)
     # When True: grass floor texture + blue-sky skybox, to improve VLM sensitivity
@@ -152,11 +152,11 @@ class ExperimentConfig:
     batching:        int = 20
 
     # ---- Prompt -------------------------------------------------------------
-    prompt_name:     str = "lamp_morph"
+    prompt_name:     str = "elephant_morph"
 
     # ---- Descriptor (VLM-based MapElite feature assessment) -----------------
     # Name of a DescriptorConfig from descriptor.py; "" = structural-only mode.
-    descriptor_config_name: str = "lamp_descriptors"
+    descriptor_config_name: str = "elephant_descriptors"
 
     # ---- Output -------------------------------------------------------------
     output_dir:            str  = "results"

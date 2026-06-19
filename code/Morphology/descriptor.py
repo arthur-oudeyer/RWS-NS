@@ -192,16 +192,16 @@ ELEPHANT_DESCRIPTORS = DescriptorConfig(
             name       = "overall looking",
             question   = (
                 "How to classify the design of this elephant-like robot ? "
-                "Consider the body parts, the arms, its characteristic and the gait. "
-                "0-1 = A legged-robot with only one elephant feature (trunk, large ears, tusk, large body),"
-                "2-3 = Only an elephant-like trunk on a support"
-                "4-5 = Only the head is identifiable (trunk, ears, tusk),"
-                "6-7 = Only the body is identifiable (large body, 4 legs, big feet),"
-                "8-9 = A large four-legged animal with an elephant head and clear features, "
-                "10 =  An elephant-inspired robot that grab and manipulate objects  "
+                "Consider the body parts, the arms and its characteristics"
+                "0-1 = no specific characteristics, generic elephant"
+                "2-3 = baby and cute elephant"
+                "4-5 = elephant with tusk"
+                "6-7 = elephant with huge ears like dumbo"
+                "8-9 = elephant with a costume, such as a hat or an outfit"
+                "10 =  sleeping elephant lying down"
             ),
             bins       = [1.5, 3.5, 5.5, 7.5, 9.5],
-            bin_labels = ["one feature", "trunk only", "head only", "body only", "elephant", "robotic"],
+            bin_labels = ["generic", "baby", "tusk", "dumbo", "costumed", "sleeping"],
         ),
         DescriptorItem(
             name       = "trunk type",
