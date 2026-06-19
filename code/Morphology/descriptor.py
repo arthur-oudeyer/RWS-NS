@@ -210,7 +210,7 @@ ELEPHANT_DESCRIPTORS = DescriptorConfig(
                 "0-1 = no clear trunk identifiable, "
                 "2-3 = weird trunk with clumsy shape (too much twisted, folded, locked), "
                 "4-5 = basic trunk-like shape, basic articulation, "
-                "6-7 = great articulated elephant-like trunk with great moving clearance, "
+                "6-7 = great organic elephant-like trunk with great moving clearance, "
                 "8-10 = a robotic shape trunk with special mechanism like gripper or suction cup"
             ),
             bins       = [1.5, 3.5, 5.5, 7.5],
