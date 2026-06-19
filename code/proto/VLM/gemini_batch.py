@@ -259,6 +259,7 @@ class GeminiBatchGrader:
 
         try:
             # Upload all images in parallel (sequentially here; could use threads)
+            t_start = time.time()
             for robot_id, img in images:
                 f = _upload_image(self._client, img, robot_id, self._debug)
                 uploaded.append(f)
@@ -271,6 +272,7 @@ class GeminiBatchGrader:
                     genai_types.Part.from_uri(file_uri=file.uri, mime_type="image/png")
                 )
             contents.append(build_batch_prompt(self._prompt_config, robot_ids))
+            print(f"Batch uplaoded in {time.time() - t_start:.2f}s")
 
             if self._debug:
                 print(f"  Sending batch of {len(images)} images to {self._model_name}...")
@@ -281,8 +283,8 @@ class GeminiBatchGrader:
                 contents = contents,
             )
             elapsed = time.time() - t0
-            if self._debug:
-                print(f"  Batch response received in {elapsed:.2f}s")
+            if self._debug: pass
+            print(f"  Batch response received in {elapsed:.2f}s")
 
         finally:
             for f in uploaded:
@@ -717,15 +719,10 @@ if __name__ == "__main__":
     # Video batch scoring:
     #   python gemini_batch.py video [video_dir] [batch_size]
 
-    video_dir  = "./video/batch"
+    dir  = "./img/batch"
     batch_size = 10
-    score_robot_video_batch(
-        video_dir        = video_dir,
-        target_behaviour = "move forward continuously while staying upright",
-        batch_size       = batch_size,
-        debug            = True,
-    )
+    run_benchmark(dir, batch_size=batch_size, debug=True)
 
     # img_dir    = sys.argv[1] if len(sys.argv) > 1 else "./img/batch"
     # batch_size = int(sys.argv[2]) if len(sys.argv) > 2 else 10
-    # run_benchmark(img_dir, batch_size=batch_size, debug=True)
+    #

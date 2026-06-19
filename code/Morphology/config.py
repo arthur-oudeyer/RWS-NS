@@ -79,9 +79,9 @@ class ExperimentConfig:
 
     # ---- Population ---------------------------------------------------------
     mu:              int = 5            # number of parents kept each generation
-    lambda_:         int = 20           # number of offspring produced each generation by mutating the previous generation
+    lambda_:         int = 25           # number of offspring produced each generation by mutating the previous generation
     sigma:           int = 0            # number of fresh random morphologies injected each generation
-    n_generations:   int = 10
+    n_generations:   int = 30
 
     # Time estimation single call : 10 s * number of robot * generations
     # Time estimation batch call  : 6 s * number of robot * generations
@@ -90,7 +90,7 @@ class ExperimentConfig:
     # init_population_size : number of random individuals evaluated at gen 0.
     #   mu_lambda  → defaults to mu  if 0
     #   map_elite  → defaults to max(mu, lambda_) * 2  if 0
-    init_population_size: int = 100 #2 * (lambda_ + sigma)
+    init_population_size: int = 250 #2 * (lambda_ + sigma)
 
     # Range of leg count for randomly generated morphologies (structure, not count)
     init_n_legs_min: int = 1
