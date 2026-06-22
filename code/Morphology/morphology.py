@@ -46,7 +46,7 @@ import numpy as np
 import config as cfg
 
 # Maximum total legs allowed during mutation
-MAX_LEGS = 8
+MAX_LEGS = 16
 MIN_LENGTH, MAX_LENGTH = 0.15, 0.4
 
 

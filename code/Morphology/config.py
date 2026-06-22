@@ -94,7 +94,7 @@ class ExperimentConfig:
 
     # Range of leg count for randomly generated morphologies (structure, not count)
     init_n_legs_min: int = 1
-    init_n_legs_max: int = 6
+    init_n_legs_max: int = 12
 
     # Number of random mutations made initially to each base individual
     init_n_mutation: int = 5
