@@ -211,8 +211,44 @@ def _archive_path(run_dir: Path, generation: int) -> Path:
     return run_dir / f"archive_gen{generation:04d}.json"
 
 
+def _sync_grid_renders(archive, run_dir: Path) -> None:
+    """Mirror the current MAP-Elite grid's renders into run_dir/grid_renders/.
+
+    The primary renders live in the shared `last_render` tmp folder, which is
+    wiped at the start of every run — so a finished run on its own does NOT
+    contain a render for every grid cell (only the per-gen best are copied into
+    renders/). This makes each run self-contained: it copies the render of every
+    current grid elite into run_dir/grid_renders/id{ID:06d}.png, updates the
+    elite's render_path to that run-local copy, and prunes renders of cells that
+    are no longer occupied. Idempotent — surviving elites are not re-copied.
+    """
+    grid = getattr(archive, "grid", None)
+    if not grid:   # mu_lambda archive (no grid) or empty grid → nothing to do
+        return
+    target = run_dir / "grid_renders"
+    target.mkdir(parents=True, exist_ok=True)
+
+    keep: set[str] = set()
+    for r in grid.values():
+        dst = target / f"id{r.individual_id:06d}.png"
+        keep.add(dst.name)
+        src = Path(r.render_path) if r.render_path else None
+        if src and src.exists() and src.resolve() != dst.resolve():
+            shutil.copy2(src, dst)
+        if dst.exists():
+            r.render_path = str(dst)   # standalone, run-local copy
+
+    # Prune renders belonging to cells no longer in the grid.
+    for f in target.glob("id*.png"):
+        if f.name not in keep:
+            f.unlink()
+
+
 def _save_archive(archive, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Keep a run-local copy of every current grid elite's render so the run dir
+    # is self-contained (the shared last_render tmp is reset on each rerun).
+    _sync_grid_renders(archive, path.parent)
     archive.save(str(path))
 
 

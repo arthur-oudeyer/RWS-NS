@@ -128,6 +128,8 @@ def _find_render(run_dir: Path, individual: dict) -> Optional[Path]:
     gen = individual.get("generation", 0)
     iid = individual.get("individual_id", 0)
     candidates = [
+        # Standalone per-run copy of the current MAP-Elite grid renders.
+        run_dir / "grid_renders" / f"id{iid:06d}.png",
         run_dir / "renders" / f"gen{gen:04d}" / f"gen{gen:04d}_id{iid:06d}.png",
         run_dir / "renders" / "best" / f"gen{gen:04d}_id{iid:06d}.png",
         run_dir / "renders" / f"gen{gen:04d}_id{iid:06d}.png",

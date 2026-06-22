@@ -150,25 +150,25 @@ def build_morphology_prompt(static_target: str, dynamic_target: str) -> str:
     SCORING RULES:
     
     coherence  — How well does the morphology match the static target ({static_target}) ?
-      0–29   = no recognizable similarity to a {static_target}
-      30–49  = vague resemblance, very weak matching feature
-      50–69  = partial match, some features of {static_target} are present
-      70–89  = some great resemblance, key features identifiable
-      90–100 = good match, structurally faithful to a {static_target}
+      0–9    = no recognizable similarity to a {static_target}
+      10–39  = vague resemblance, very weak matching feature
+      40–59  = partial match, some features of {static_target} are present
+      60–89  = great resemblance, all key features identifiable
+      90–100 = very good match, structurally faithful to a {static_target} (this category must be chosen only for real breakthrough)
     
     originality  — Is the structural design novel or inventive ?
-      0–29   = generic, indistinguishable from a randomly generated MuJoCo morphology
-      30–49  = basic organisation and minor variation on a standard body plan
-      50–69  = one interesting structural choice (unusual limb count, asymmetry, etc.)
-      70–89  = novel design with inventive features
-      90–100 = creative, unexpected but clever combination of structures
+      0–9    = generic, indistinguishable from a randomly generated MuJoCo morphology
+      10–49  = basic organisation and minor variation on a standard body plan
+      40–59  = one interesting structural choice (unusual limb count, asymmetry, etc.)
+      60–89  = novel design with inventive features
+      90–100 = very creative, unexpected but clever combination of structures (this category must be chosen only for real breakthrough)
     
     potential  — Is the structural design have some potential for further evolution toward the target ?
-      0–29   = completely off-topic, very far from target, hopeless
-      30–49  = very poor design, hard to tweak toward the target
-      50–69  = plausible but inefficient, long evolution needed
-      70–89  = design that could works, but needs improvement
-      90–100 = very interesting design able to evolve toward the target
+      0–9    = completely off-topic, very far from target, hopeless
+      10–39  = very poor design, hard to tweak toward the target
+      40–59  = plausible but inefficient, long evolution needed
+      60–89  = design that could works, could still have improvements
+      90–100 = very interesting design able to evolve toward the target (this category must be chosen only for real breakthrough)
     
     ═══ OUTPUT FORMAT ═══
     Respond ONLY with valid JSON, no text before or after:
