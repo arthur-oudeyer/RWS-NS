@@ -48,7 +48,7 @@ from config       import ExperimentConfig
 from archive      import MuLambdaArchive, MapEliteArchive
 from evolution    import BaseEvolution, make_evolution
 from rendering    import MorphologyRenderer, RenderConfig, CameraView
-from grader       import CLIPGrader, GeminiGrader, MorphologyGrader
+from grader       import CLIPGrader, GeminiGrader, MorphologyGrader, GeminiUnavailableError
 from CLIP_prompts import get_clip_prompt_set
 from gemini_prompts import get_gemini_prompt_set
 from data_handler import MorphologyResult, result_to_dict
@@ -166,6 +166,8 @@ def _make_grader(cfg: ExperimentConfig) -> MorphologyGrader:
             batch_size=cfg.batching,
             descriptor_config=descriptor_config,
             response_log_path=str(cfg.run_dir / "vlm_responses.jsonl"),
+            max_retries=cfg.gemini_max_retries,
+            retry_base_delay=cfg.gemini_retry_base_delay,
         )
     else:
         raise AttributeError(f"{cfg.grader_type} not recognised as grader.")
@@ -362,60 +364,65 @@ def run(
     print(f"[experiment] Archive, Random generator, Evolution manager initialized.")
 
     print(f"[experiment] Starting experiment with random individuals...")
-    # ---- Generation 0: initialise -------------------------------------------
-    n_init = getattr(cfg, "init_population_size", 0) or cfg.mu
-    t0 = time.perf_counter()
-    with _LiveTimer(n_init, 0, cfg.n_generations):
-        init_results, id_counter = evo.initialise(
-            renderer     = renderer,
-            grader       = grader,
-            id_counter   = 0,
-            save_renders = save_renders,
-            render_dir   = str(run_dir / "renders" / "gen0000") if save_renders else None,
-        )
-    archive.update(init_results)
-    elapsed = time.perf_counter() - t0
-    _log_individuals(indiv_log_path, init_results)
-
-    _print_progress(0, cfg.n_generations, "init", init_results, archive, elapsed)
-    _log_generation(log_path, 0, "init", init_results, archive, elapsed)
-
-    if 0 % cfg.save_every_n_gen == 0:
-        _save_archive(archive, _archive_path(run_dir, 0))
-    if cfg.save_best_every_n_gen > 0 and 0 % cfg.save_best_every_n_gen == 0:
-        _save_best_render(archive, renderer, run_dir, f"best/gen{0:04d}")
-
-    # ---- Evolution loop ------------------------------------------------------
-    n_step = cfg.lambda_ + getattr(cfg, "sigma", 0)
-    for generation in range(1, cfg.n_generations + 1):
-        gen_render_dir = (
-            str(run_dir / "renders" / f"gen{generation:04d}")
-            if save_renders else None
-        )
+    try:
+        # ---- Generation 0: initialise ---------------------------------------
+        n_init = getattr(cfg, "init_population_size", 0) or cfg.mu
         t0 = time.perf_counter()
-        prev_id = id_counter
-        with _LiveTimer(n_step, generation, cfg.n_generations):
-            results, id_counter = evo.step(
-                archive      = archive,
+        with _LiveTimer(n_init, 0, cfg.n_generations):
+            init_results, id_counter = evo.initialise(
                 renderer     = renderer,
                 grader       = grader,
-                generation   = generation,
-                id_counter   = id_counter,
+                id_counter   = 0,
                 save_renders = save_renders,
-                render_dir   = gen_render_dir,
+                render_dir   = str(run_dir / "renders" / "gen0000") if save_renders else None,
             )
-        archive.update(results)
+        archive.update(init_results)
         elapsed = time.perf_counter() - t0
-        # Only log truly new individuals (offspring), not re-tagged parents
-        _log_individuals(indiv_log_path, [r for r in results if r.individual_id >= prev_id])
+        _log_individuals(indiv_log_path, init_results)
 
-        _print_progress(generation, cfg.n_generations, "step", results, archive, elapsed)
-        _log_generation(log_path, generation, "step", results, archive, elapsed)
+        _print_progress(0, cfg.n_generations, "init", init_results, archive, elapsed)
+        _log_generation(log_path, 0, "init", init_results, archive, elapsed)
 
-        if generation % cfg.save_every_n_gen == 0:
-            _save_archive(archive, _archive_path(run_dir, generation))
-        if cfg.save_best_every_n_gen > 0 and generation % cfg.save_best_every_n_gen == 0:
-            _save_best_render(archive, renderer, run_dir, f"best/gen{generation:04d}")
+        if 0 % cfg.save_every_n_gen == 0:
+            _save_archive(archive, _archive_path(run_dir, 0))
+        if cfg.save_best_every_n_gen > 0 and 0 % cfg.save_best_every_n_gen == 0:
+            _save_best_render(archive, renderer, run_dir, f"best/gen{0:04d}")
+
+        # ---- Evolution loop -------------------------------------------------
+        n_step = cfg.lambda_ + getattr(cfg, "sigma", 0)
+        for generation in range(1, cfg.n_generations + 1):
+            gen_render_dir = (
+                str(run_dir / "renders" / f"gen{generation:04d}")
+                if save_renders else None
+            )
+            t0 = time.perf_counter()
+            prev_id = id_counter
+            with _LiveTimer(n_step, generation, cfg.n_generations):
+                results, id_counter = evo.step(
+                    archive      = archive,
+                    renderer     = renderer,
+                    grader       = grader,
+                    generation   = generation,
+                    id_counter   = id_counter,
+                    save_renders = save_renders,
+                    render_dir   = gen_render_dir,
+                )
+            archive.update(results)
+            elapsed = time.perf_counter() - t0
+            # Only log truly new individuals (offspring), not re-tagged parents
+            _log_individuals(indiv_log_path, [r for r in results if r.individual_id >= prev_id])
+
+            _print_progress(generation, cfg.n_generations, "step", results, archive, elapsed)
+            _log_generation(log_path, generation, "step", results, archive, elapsed)
+
+            if generation % cfg.save_every_n_gen == 0:
+                _save_archive(archive, _archive_path(run_dir, generation))
+            if cfg.save_best_every_n_gen > 0 and generation % cfg.save_best_every_n_gen == 0:
+                _save_best_render(archive, renderer, run_dir, f"best/gen{generation:04d}")
+    except GeminiUnavailableError as exc:
+        print(f"\n[experiment] STOPPING CLEANLY — Gemini API unavailable:\n  {exc}")
+        print("[experiment] Saving progress so far and shutting down. "
+              f"Resume later with:  python experiment.py --resume {run_dir}")
 
     # ---- Final save ----------------------------------------------------------
     final_path = run_dir / "archive_final.json"
@@ -503,34 +510,39 @@ def resume(
     print("[experiment] Done, loop restarted.")
     # Resume loop
     n_step = cfg.lambda_ + getattr(cfg, "sigma", 0)
-    for generation in range(start_gen, cfg.n_generations + 1):
-        gen_render_dir = (
-            str(run_dir / "renders" / f"gen{generation:04d}")
-            if save_renders else None
-        )
-        t0 = time.perf_counter()
-        prev_id = id_counter
-        with _LiveTimer(n_step, generation, cfg.n_generations):
-            results, id_counter = evo.step(
-                archive      = archive,
-                renderer     = renderer,
-                grader       = grader,
-                generation   = generation,
-                id_counter   = id_counter,
-                save_renders = save_renders,
-                render_dir   = gen_render_dir,
+    try:
+        for generation in range(start_gen, cfg.n_generations + 1):
+            gen_render_dir = (
+                str(run_dir / "renders" / f"gen{generation:04d}")
+                if save_renders else None
             )
-        archive.update(results)
-        elapsed = time.perf_counter() - t0
-        _log_individuals(indiv_log_path, [r for r in results if r.individual_id >= prev_id])
+            t0 = time.perf_counter()
+            prev_id = id_counter
+            with _LiveTimer(n_step, generation, cfg.n_generations):
+                results, id_counter = evo.step(
+                    archive      = archive,
+                    renderer     = renderer,
+                    grader       = grader,
+                    generation   = generation,
+                    id_counter   = id_counter,
+                    save_renders = save_renders,
+                    render_dir   = gen_render_dir,
+                )
+            archive.update(results)
+            elapsed = time.perf_counter() - t0
+            _log_individuals(indiv_log_path, [r for r in results if r.individual_id >= prev_id])
 
-        _print_progress(generation, cfg.n_generations, "step", results, archive, elapsed)
-        _log_generation(log_path, generation, "step", results, archive, elapsed)
+            _print_progress(generation, cfg.n_generations, "step", results, archive, elapsed)
+            _log_generation(log_path, generation, "step", results, archive, elapsed)
 
-        if generation % cfg.save_every_n_gen == 0:
-            _save_archive(archive, _archive_path(run_dir, generation))
-        if cfg.save_best_every_n_gen > 0 and generation % cfg.save_best_every_n_gen == 0:
-            _save_best_render(archive, renderer, run_dir, f"best/gen{generation:04d}")
+            if generation % cfg.save_every_n_gen == 0:
+                _save_archive(archive, _archive_path(run_dir, generation))
+            if cfg.save_best_every_n_gen > 0 and generation % cfg.save_best_every_n_gen == 0:
+                _save_best_render(archive, renderer, run_dir, f"best/gen{generation:04d}")
+    except GeminiUnavailableError as exc:
+        print(f"\n[experiment] STOPPING CLEANLY — Gemini API unavailable:\n  {exc}")
+        print("[experiment] Saving progress so far and shutting down. "
+              f"Resume later with:  python experiment.py --resume {run_dir}")
 
     final_path = run_dir / "archive_final.json"
     _save_archive(archive, final_path)

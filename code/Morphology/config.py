@@ -151,12 +151,18 @@ class ExperimentConfig:
     gemini_model:    str = "gemini-3-flash-preview"
     batching:        int = 20
 
+    # API resilience: transient Gemini errors (503/429/timeouts) are retried
+    # with exponential backoff (delay = base * 2**attempt). After the retries
+    # are exhausted the run stops cleanly (progress saved) instead of crashing.
+    gemini_max_retries:      int   = 4      # retries AFTER the first attempt
+    gemini_retry_base_delay: float = 5.0    # seconds
+
     # ---- Prompt -------------------------------------------------------------
-    prompt_name:     str = "elephant_morph"
+    prompt_name:     str = "tree_morph"
 
     # ---- Descriptor (VLM-based MapElite feature assessment) -----------------
     # Name of a DescriptorConfig from descriptor.py; "" = structural-only mode.
-    descriptor_config_name: str = "elephant_descriptors"
+    descriptor_config_name: str = "tree_descriptors"
 
     # ---- Output -------------------------------------------------------------
     output_dir:            str  = "results"

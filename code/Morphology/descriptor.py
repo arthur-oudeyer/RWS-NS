@@ -219,6 +219,40 @@ ELEPHANT_DESCRIPTORS = DescriptorConfig(
     ],
 )
 
+TREE_DESCRIPTORS = DescriptorConfig(
+    name  = "tree_descriptors",
+    feature_dims = ["tree type", "overall looking"],
+    items = [
+        DescriptorItem(
+            name       = "overall looking",
+            question   = (
+                "How to classify the design of this tree-like robot ? "
+                "Consider the body parts, the arms and its characteristics"
+                "0 = no specific characteristics, generic tree"
+                "1-2 = a clumsy or broken tree"
+                "3-4 = a very tall tree of its type"
+                "5-6 = a very small tree of its type"
+                "7-8 = a very wide tree of its type"
+                "9-10 = a very narrow tree of its type"
+            ),
+            bins       = [0.5, 2.5, 3.5, 6.5, 8.5],
+            bin_labels = ["generic", "baby", "tusk", "dumbo", "costumed", "sleeping"],
+        ),
+        DescriptorItem(
+            name       = "tree type",
+            question   = (
+                "How too characterized the type of the tree ? "
+                "0-1 = a bush or shrub"
+                "2-3 = a cold forest tree (pines, ...)"
+                "4-5 = a temperate forest tree (oaks, birch, ...)"
+                "6-7 = a tropical forest tree (palms, banana tree, bamboo, ...)"
+                "8-10 = other types of tree"
+            ),
+            bins       = [1.5, 3.5, 5.5, 7.5],
+            bin_labels = ["shrub", "cold forest", "temperate forest", "tropical forest", "other"],
+        ),
+    ],
+)
 
 # ---------------------------------------------------------------------------
 # Registry
@@ -226,7 +260,7 @@ ELEPHANT_DESCRIPTORS = DescriptorConfig(
 
 ALL_DESCRIPTOR_CONFIGS: dict[str, DescriptorConfig] = {
     cfg.name: cfg
-    for cfg in (GENERIC_DESCRIPTORS, LAMP_DESCRIPTORS, ELEPHANT_DESCRIPTORS)
+    for cfg in (GENERIC_DESCRIPTORS, LAMP_DESCRIPTORS, ELEPHANT_DESCRIPTORS, TREE_DESCRIPTORS)
 }
 
 

@@ -392,6 +392,14 @@ except ImportError:
     _DESCRIPTOR_AVAILABLE = False
 
 
+class GeminiUnavailableError(RuntimeError):
+    """Raised when Gemini stays unavailable after exhausting all retries.
+
+    Signals the experiment loop to stop the run cleanly (saving progress so
+    far) instead of crashing with a raw API traceback.
+    """
+
+
 class GeminiGrader(MorphologyGrader):
     """
     Scores morphology images using Google Gemini (VLM).
@@ -427,6 +435,8 @@ class GeminiGrader(MorphologyGrader):
         batch_size:        int  = 10,
         descriptor_config: "Optional[_DescriptorConfig]" = None,
         response_log_path: "Optional[str]" = None,
+        max_retries:       int   = 4,
+        retry_base_delay:  float = 5.0,
         debug:             bool = False,
     ):
         if not _GEMINI_AVAILABLE:
@@ -450,6 +460,8 @@ class GeminiGrader(MorphologyGrader):
         self._batch_size        = batch_size
         self._descriptor_config = descriptor_config
         self._response_log_path = response_log_path
+        self._max_retries       = max_retries
+        self._retry_base_delay  = retry_base_delay
 
         if debug:
             desc_str = descriptor_config.name if descriptor_config else "none"
@@ -466,6 +478,55 @@ class GeminiGrader(MorphologyGrader):
         if self._descriptor_config is None:
             return base_prompt
         return base_prompt + _build_desc_section(self._descriptor_config)
+
+    @staticmethod
+    def _is_transient(exc: Exception) -> bool:
+        """True for retryable API errors (overload / rate-limit / timeouts)."""
+        status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+        if status in (408, 429, 500, 502, 503, 504):
+            return True
+        msg = str(exc).upper()
+        return any(tok in msg for tok in (
+            "UNAVAILABLE", "RESOURCE_EXHAUSTED", "DEADLINE_EXCEEDED",
+            "INTERNAL", "503", "502", "504", "429", "TIMEOUT", "OVERLOADED",
+        ))
+
+    def _call_with_retry(self, label: str, fn):
+        """Call `fn` (a Gemini API call), retrying transient failures.
+
+        On a transient error, retries up to ``self._max_retries`` times with
+        exponential backoff. Non-transient errors propagate immediately. When
+        all retries are exhausted, raises GeminiUnavailableError so the run
+        loop can stop cleanly.
+        """
+        import time
+        last_exc = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                return fn()
+            except Exception as exc:  # noqa: BLE001 — re-raised below if not transient
+                if not self._is_transient(exc):
+                    raise
+                last_exc = exc
+                if attempt >= self._max_retries:
+                    break
+                delay = self._retry_base_delay * (2 ** attempt)
+                print(f"  [grader/gemini] Transient API error on {label} "
+                      f"(attempt {attempt + 1}/{self._max_retries + 1}): {exc}. "
+                      f"Retrying in {delay:.0f}s...")
+                time.sleep(delay)
+        raise GeminiUnavailableError(
+            f"Gemini still unavailable for '{label}' after "
+            f"{self._max_retries + 1} attempts. Last error: {last_exc}"
+        ) from last_exc
+
+    def _safe_delete(self, name: str) -> None:
+        """Best-effort remote file deletion; never raises (runs in finally)."""
+        try:
+            self._client.files.delete(name=name)
+        except Exception as exc:  # noqa: BLE001 — cleanup must not mask errors
+            print(f"  [grader/gemini] WARNING: failed to delete remote file "
+                  f"{name}: {exc}")
 
     def _extract_vlm_descriptors(self, parsed: dict) -> dict:
         """Extract VLM descriptor scores from a parsed JSON response dict."""
@@ -548,13 +609,19 @@ class GeminiGrader(MorphologyGrader):
                 if ref_bytes is not None:
                     if dbg:
                         print(f"  [grader/gemini/batch] Uploading reference ({len(ref_bytes)//1024} KB)...")
-                    ref_file = self._client.files.upload(
-                        file=io.BytesIO(ref_bytes),
-                        config=_genai_types.UploadFileConfig(mime_type="image/png"),
+                    ref_file = self._call_with_retry(
+                        "reference upload",
+                        lambda: self._client.files.upload(
+                            file=io.BytesIO(ref_bytes),
+                            config=_genai_types.UploadFileConfig(mime_type="image/png"),
+                        ),
                     )
                     while ref_file.state.name == "PROCESSING":
                         time.sleep(0.2)
-                        ref_file = self._client.files.get(name=ref_file.name)
+                        ref_file = self._call_with_retry(
+                            "reference status",
+                            lambda: self._client.files.get(name=ref_file.name),
+                        )
                     if ref_file.state.name == "FAILED":
                         raise RuntimeError("[grader/gemini/batch] Reference image upload failed")
 
@@ -562,16 +629,22 @@ class GeminiGrader(MorphologyGrader):
                 for robot_id, img in chunk:
                     buf = io.BytesIO()
                     img.save(buf, format="PNG")
-                    buf.seek(0)
+                    png = buf.getvalue()
                     if dbg:
-                        print(f"  [grader/gemini/batch] Uploading {robot_id} ({len(buf.getvalue())//1024} KB)...")
-                    img_file = self._client.files.upload(
-                        file=buf,
-                        config=_genai_types.UploadFileConfig(mime_type="image/png"),
+                        print(f"  [grader/gemini/batch] Uploading {robot_id} ({len(png)//1024} KB)...")
+                    img_file = self._call_with_retry(
+                        f"{robot_id} upload",
+                        lambda png=png: self._client.files.upload(
+                            file=io.BytesIO(png),
+                            config=_genai_types.UploadFileConfig(mime_type="image/png"),
+                        ),
                     )
                     while img_file.state.name == "PROCESSING":
                         time.sleep(0.2)
-                        img_file = self._client.files.get(name=img_file.name)
+                        img_file = self._call_with_retry(
+                            f"{robot_id} status",
+                            lambda img_file=img_file: self._client.files.get(name=img_file.name),
+                        )
                     if img_file.state.name == "FAILED":
                         raise RuntimeError(f"[grader/gemini/batch] Upload failed for {robot_id}")
                     uploaded.append(img_file)
@@ -594,18 +667,21 @@ class GeminiGrader(MorphologyGrader):
                     ref_str = " + reference" if ref_file else ""
                     print(f"  [grader/gemini/batch] Sending {len(chunk)} images{ref_str}...")
 
-                response = self._client.models.generate_content(
-                    model=self._model_name,
-                    contents=contents,
+                response = self._call_with_retry(
+                    "batch generate_content",
+                    lambda: self._client.models.generate_content(
+                        model=self._model_name,
+                        contents=contents,
+                    ),
                 )
                 text = response.text
                 self._log_response("batch", robot_ids, text)
 
             finally:
                 for img_file in uploaded:
-                    self._client.files.delete(name=img_file.name)
+                    self._safe_delete(img_file.name)
                 if ref_file is not None:
-                    self._client.files.delete(name=ref_file.name)
+                    self._safe_delete(ref_file.name)
                 if dbg:
                     n_del = len(uploaded) + (1 if ref_file else 0)
                     print(f"  [grader/gemini/batch] Deleted {n_del} remote files.")
@@ -782,35 +858,44 @@ class GeminiGrader(MorphologyGrader):
         if dbg:
             print(f"  [grader/gemini] Uploading image ({len(png_bytes)//1024} KB)...")
 
-        img_file = self._client.files.upload(
-            file   = io.BytesIO(png_bytes),
-            config = _genai_types.UploadFileConfig(mime_type="image/png"),
+        img_file = self._call_with_retry(
+            "single upload",
+            lambda: self._client.files.upload(
+                file   = io.BytesIO(png_bytes),
+                config = _genai_types.UploadFileConfig(mime_type="image/png"),
+            ),
         )
 
         # Wait for processing
         while img_file.state.name == "PROCESSING":
             time.sleep(0.2)
-            img_file = self._client.files.get(name=img_file.name)
+            img_file = self._call_with_retry(
+                "single status",
+                lambda img_file=img_file: self._client.files.get(name=img_file.name),
+            )
 
         if img_file.state.name == "FAILED":
             raise RuntimeError("[grader/gemini] Image processing failed on Gemini's side.")
 
         # --- Query model ---
         try:
-            response = self._client.models.generate_content(
-                model    = self._model_name,
-                contents = [
-                    _genai_types.Part.from_uri(
-                        file_uri  = img_file.uri,
-                        mime_type = "image/png",
-                    ),
-                    self._build_full_prompt(self._prompt_config.prompt),
-                ],
+            response = self._call_with_retry(
+                "single generate_content",
+                lambda: self._client.models.generate_content(
+                    model    = self._model_name,
+                    contents = [
+                        _genai_types.Part.from_uri(
+                            file_uri  = img_file.uri,
+                            mime_type = "image/png",
+                        ),
+                        self._build_full_prompt(self._prompt_config.prompt),
+                    ],
+                ),
             )
             text = response.text
             self._log_response("single", [], text)
         finally:
-            self._client.files.delete(name=img_file.name)
+            self._safe_delete(img_file.name)
             if dbg:
                 print("  [grader/gemini] Remote file deleted.")
 

@@ -236,13 +236,20 @@ LAMP_MORPH = GeminiPromptConfig(
     weights = GeminiScoringWeights(coherence=1.0, originality=0.5, potential=1.5),
 )
 
+TREE_MORPH = GeminiPromptConfig(
+    name    = "tree_morph",
+    target  = "tree",
+    prompt  = build_morphology_prompt("tree", "capturing lights"),
+    weights = GeminiScoringWeights(coherence=1.0, originality=0.5, potential=1.5),
+)
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
 ALL_GEMINI_PROMPT_CONFIGS: dict[str, GeminiPromptConfig] = {
     cfg.name: cfg
-    for cfg in (INSECT_MORPH, SPIDER_MORPH, CRAB_MORPH, KANGAROO_MORPH, GOALKEEPER_MORPH, CENTIPEDE_MORPH, LAMP_MORPH, ELEPHANT_MORPH)
+    for cfg in (INSECT_MORPH, SPIDER_MORPH, CRAB_MORPH, KANGAROO_MORPH, GOALKEEPER_MORPH, CENTIPEDE_MORPH, LAMP_MORPH, ELEPHANT_MORPH, TREE_MORPH)
 }
 
 
