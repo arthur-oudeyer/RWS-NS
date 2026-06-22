@@ -236,7 +236,7 @@ TREE_DESCRIPTORS = DescriptorConfig(
                 "9-10 = a very narrow tree of its type"
             ),
             bins       = [0.5, 2.5, 3.5, 6.5, 8.5],
-            bin_labels = ["generic", "baby", "tusk", "dumbo", "costumed", "sleeping"],
+            bin_labels = ["generic", "clumsy", "tall", "small", "wide", "narrow"],
         ),
         DescriptorItem(
             name       = "tree type",
