@@ -376,7 +376,7 @@ def _debug_smoke():
     class _FakeOut:
         def __init__(self, fit):
             self.fitness = fit
-            self.raw_scores = {"coherence": fit, "progress": fit, "interest": fit}
+            self.raw_scores = {"coherence": fit, "progress": fit, "potential": fit}
             self.method = "fake"
             self.prompt_set = "fake"
             self.extra = {"vlm_descriptors": {}}

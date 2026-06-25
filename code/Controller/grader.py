@@ -15,7 +15,7 @@ Public API
 
 Fitness formula
 ---------------
-    fitness = (w_c * coherence + w_p * progress + w_i * interest)
+    fitness = (w_c * coherence + w_p * progress + w_i * potential)
               / (10 * (w_c + w_p + w_i))
     → always in [0, 1]
 
@@ -375,7 +375,7 @@ class LocomotionGrader:
             '      "interpretation": "behavioural interpretation",\n'
             '      "coherence":      { "score": <int 0-100>, "reason": "..." },\n'
             '      "originality":    { "score": <int 0-100>, "reason": "..." },\n'
-            '      "interest":       { "score": <int 0-100>, "reason": "..." }'
+            '      "potential":       { "score": <int 0-100>, "reason": "..." }'
             + (f',\n{desc_schema}' if desc_schema else "")
             + "\n    }"
         )
@@ -440,37 +440,37 @@ class LocomotionGrader:
             val = parsed.get(key, {})
             return val.get("reason", "") if isinstance(val, dict) else ""
 
-        coherence = _score("coherence")
-        progress  = _score("progress")
-        interest  = _score("interest")
+        # The prompt emits coherence / originality / potential, each 0-100.
+        # Normalise to [0,1] so fitness and raw_scores match the documented range.
+        coherence   = _score("coherence")   / 100.0
+        originality = _score("originality") / 100.0
+        potential   = _score("potential")   / 100.0
 
         w = self._prompt_config.weights
-        total_w = w.coherence + w.originality + w.interest
-        # Each dim is now in [0,1] (we already divided by 100). The instruction
-        # spec asks for fitness in [0,1] so we just take the weighted mean.
-        fitness = (w.coherence * coherence + w.originality * progress + w.interest * interest) / total_w
+        total_w = w.coherence + w.originality + w.potential
+        fitness = (w.coherence * coherence + w.originality * originality + w.potential * potential) / total_w
         fitness = round(fitness, 6)
 
         if dbg:
-            print(f"  coherence={coherence:.2f}  progress={progress:.2f}  "
-                  f"interest={interest:.2f}  → fitness={fitness:.4f}")
+            print(f"  coherence={coherence:.2f}  originality={originality:.2f}  "
+                  f"potential={potential:.2f}  → fitness={fitness:.4f}")
 
         return GraderOutput(
             fitness    = fitness,
             raw_scores = {
-                "coherence": round(coherence, 4),
-                "progress":  round(progress,  4),
-                "interest":  round(interest,  4),
+                "coherence":   round(coherence,   4),
+                "originality": round(originality, 4),
+                "potential":   round(potential,   4),
             },
             method     = method,
             prompt_set = self._prompt_config.name,
             extra={
-                "observation":      parsed.get("observation", ""),
-                "interpretation":   parsed.get("interpretation", ""),
-                "coherence_reason": _reason("coherence"),
-                "progress_reason":  _reason("progress"),
-                "interest_reason":  _reason("interest"),
-                "vlm_descriptors":  self._extract_vlm_descriptors(parsed),
+                "observation":        parsed.get("observation", ""),
+                "interpretation":     parsed.get("interpretation", ""),
+                "coherence_reason":   _reason("coherence"),
+                "originality_reason": _reason("originality"),
+                "potential_reason":   _reason("potential"),
+                "vlm_descriptors":    self._extract_vlm_descriptors(parsed),
             },
         )
 

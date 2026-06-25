@@ -15,11 +15,11 @@ Output JSON schema expected from Gemini
       "interpretation":  "behavioural interpretation",
       "coherence":       { "score": <int 0-100>, "reason": "..." },
       "progress":        { "score": <int 0-100>, "reason": "..." },
-      "interest":        { "score": <int 0-100>, "reason": "..." }
+      "potential":        { "score": <int 0-100>, "reason": "..." }
     }
 
 Fitness formula (computed by LocomotionGrader)
-    fitness = (w_c * coherence + w_p * progress + w_i * interest)
+    fitness = (w_c * coherence + w_p * progress + w_i * potential)
               / (10 * (w_c + w_p + w_i))
 """
 
@@ -39,7 +39,7 @@ class LocomotionScoringWeights:
     """How the three locomotion scores combine into one fitness value."""
     coherence: float = 1.0
     originality:  float = 0.5
-    interest:  float = 1.5
+    potential:  float = 1.5
 
 
 @dataclass
@@ -83,73 +83,48 @@ def build_locomotion_prompt(target_behaviour: str) -> str:
       "interpretation": "behavioural interpretation relative to the target",
       "coherence":      { "score": <int 0-100>, "reason": "..." },
       "originality":    { "score": <int 0-100>, "reason": "..." },
-      "interest":       { "score": <int 0-100>, "reason": "..." }
+      "potential":       { "score": <int 0-100>, "reason": "..." }
     }"""
 
     return f"""
     ═══ CONTEXT ═══
 
-    You are a strict and skeptical evaluator analysing a 5-second physics-simulation
-    video of a robot in MuJoCo. Your job is to be PRECISE and
-    CONSERVATIVE — do not give benefit of the doubt and do not assume movement
-    if you are unsure.
+    You are looking at video of a short simulation showing two side-by-side view of a simulated robot composed of a white torso, 3 colored legs (red, orange, pink), one blue neck and a small green head. The joint are the yellow balls. It stands on a green checkered floor, and the background is blue.
 
-    The scene of each video is composed of :
-    - 2 horizontally merged video of the same scene. The left view is a side-view of the robot, the right view is a 3/4 view.
-    - Each two scene has a fixed-pose camera
-    - The floor is a grassy green checkerboard, with a grey-green square plate on it which is the start location of the robot, it is static and used has reference for spatial distances.
-    - The robot has white ellipsoidal body parts (like the base torso) and colored legs with yellow sphere as feet.
-    - Background is plain blue (no distractors) (only visible on left view)
-    
-    Target behaviour : {target_behaviour}
+    Target behavior : {target_behaviour}
 
     ═══ ANALYSIS ═══
 
-    Step 1 — Frame-by-frame factual observation
-    Be specific. Note the moment of any event, the position of the limb, de displacement of the robot between frames. Use the starting plate as relative displacement / movement reference, if the robot is not on it, it means it has moved.
-    example :
-    - Frame 1 (0.0 s): the robot is standing upright (the torso is sufficiently high), 3 limbs are touching the floor and one (the blue one) is pointing toward the sky.
-    - ~2.0 s: the robot have just started a movement toward the left, it's limbs are moving in a periodic but nervous pattern but slip a lot on the ground. The robot stays balanced but tilts a lot in some positions.
-    - ~2.5 s: the robot have moved by around 3 ground tiles from its starting point toward the left, his gait looks like he is nervous due to hesitating but brutal movements. The limbs are all touching the ground in a stable position. The torso is slightly tilted but the overall balance is good.
-    - Final frame (~5.0 s): the robot has completely crashed on the ground, he has 3 out of 4 limbs toward the sky and is laying on the side. He is not moving anymore.
-    - Key events: fall at 4s s, stagnation at 4s s, gait change at 2s, …
-
+    Step 1 — factual observation
+    Describe the robot morphology and behavior. Don't hold back when it comes to wordiness.
+    
     Step 2 — Behavioural interpretation
-    - Did the robot make consistent consistent action relevant with the target behavior ?
-    - Was the gait coherent (periodic, balanced, repeatable) or random ? What was the type of the gait (smooth, energetic, nervous, wide, brutal, efficient, small, homogenous, ...) ?
-    - Is there anything novel or interesting about the motion pattern even if the robot did not perform well for the target behavior ? (ex: is a limb doing a movement with great potential ?)
+    - Did the robot make consistent actions relevant to the target behaviour ?
+    - Was the gait coherent (periodic / balanced / repeatable) or random ? What type of gait (smooth, energetic, nervous, wide, brutal, efficient, small, homogeneous, ...) ?
+    - Is there anything novel / original / interesting about the motion pattern even if the robot did not perform well for the target behaviour ? (e.g. is a limb doing a movement with great potential ?)
 
-    Step 3 — Conservative scoring (each dimension 0–100)
+    Step 3 — Scoring (each dimension 0–100)
 
-    coherence — Is the gait relevant for the target behavior ?
+    coherence — Is the gait relevant for the target behaviour ?
       0–29   = chaotic thrashing, immediate collapse, fully static or no recognisable pattern
       30–49  = unstable, sporadic; one or two coherent moments only that have a link to the target
-      50–69  = partial coherence; clear periodic pattern or specific movement but with wobble or stalls. The target can be identified.
+      50–69  = partial coherence; clear pattern or specific movement but with wobble or stalls. The target can be identified.
       70–89  = coherent, repeatable gait or target well reached ; minor instabilities only. The intention toward target is obvious.
-      90–100 = clean, stable, periodic locomotion throughout, the target is perfectly depict through this video.
+      90–100 = clean, stable locomotion throughout; the target is perfectly depicted through this video.
 
-    originality — Did the robot achieve something toward the behavioral target in an original way ?
+    originality — Did the robot achieve something toward the behavioural target in an original way ?
       0–29   = no movement or movement very basic with no progress toward the target
       30–49  = one basic movement, not very original
       50–69  = novel movements that provide new ability for the robot
-      70–89  = clear and unexpected movement that somehow help the robot progress toward the target behavior
-      90–100 = very unexpected but very efficient way to reach the behavior wanted
+      70–89  = clear and unexpected movement that somehow helps the robot progress toward the target behaviour
+      90–100 = very unexpected but very efficient way to reach the wanted behaviour
 
-    interest — Is the gait pattern interesting, biologically plausible and leads to a real evolutionary potential ?
+    potential — Is the gait pattern interesting, biologically plausible and leading to real evolutionary potential ?
       0–29   = uninteresting (random, fallen) or obviously broken
       30–49  = generic, predictable motion with no notable features
-      50–69  = one notable element (unusual gait phase, rhythm, recovery) that have potential
-      70–89  = clearly interesting motion: reminiscent of an animal gait,
-               coordinated pattern, or creative body usage to reached the target. There is a great potential.
+      50–69  = one notable element (unusual gait phase, rhythm, recovery) that has potential
+      70–89  = clearly interesting motion: reminiscent of an animal gait, coordinated pattern, or creative body usage to reach the target. Great potential.
       90–100 = highly interesting; novel and biologically convincing locomotion, great abilities and great potential for further evolution.
-
-    Be conservative. Do not infer behaviour you did not or barely see. A frame that
-    "looks like it could be moving" but with no actual displacement is NOT movement — call it stagnation.
-
-    ═══ OUTPUT FORMAT ═══
-    Respond ONLY with valid JSON, no text before or after:
-    
-    {output_format}
     """
 
 def get_fake_answer():
@@ -158,7 +133,7 @@ def get_fake_answer():
       "interpretation": "fake interpretation",
       "coherence":      { "score": random.randint(0, 100), "reason": "coherence reason" },
       "originality":    { "score": random.randint(0, 100), "reason": "originality reason" },
-      "interest":       { "score": random.randint(0, 100), "reason": "interest reason" }
+      "potential":       { "score": random.randint(0, 100), "reason": "potential reason" }
     }
     return json.dumps(raw, indent=2)
 
@@ -186,9 +161,9 @@ def generate_fake_vlm_batch_response(robot_ids):
                 "score": random.randint(0, 100),
                 "reason": f"Originality reason for {robot_id}."
             },
-            "interest": {
+            "potential": {
                 "score": random.randint(0, 100),
-                "reason": f"Interest reason for {robot_id}."
+                "reason": f"potential reason for {robot_id}."
             }
         }
 
@@ -206,21 +181,21 @@ WALK_FORWARD = LocomotionPromptConfig(
     name    = "walk_forward",
     target  = "walk forward fast and continuously while staying upright",
     prompt  = build_locomotion_prompt("walk forward fast and continuously while staying upright"),
-    weights = LocomotionScoringWeights(coherence=1.0, originality=0.5, interest=1.5),
+    weights = LocomotionScoringWeights(coherence=1.0, originality=0.5, potential=1.5),
 )
 
 JUMP_HIGH = LocomotionPromptConfig(
     name    = "jump_high",
     target  = "jump as high as possible using all four legs",
     prompt  = build_locomotion_prompt("jump as high as possible using all four legs"),
-    weights = LocomotionScoringWeights(coherence=1.0, originality=0.5, interest=1.5),
+    weights = LocomotionScoringWeights(coherence=1.0, originality=0.5, potential=1.5),
 )
 
 CRAWL = LocomotionPromptConfig(
     name    = "crawl",
     target  = "crawl forward with the torso low to the ground",
     prompt  = build_locomotion_prompt("crawl forward with the torso low to the ground"),
-    weights = LocomotionScoringWeights(coherence=1.0, originality=0.5, interest=1.5),
+    weights = LocomotionScoringWeights(coherence=1.0, originality=0.5, potential=1.5),
 )
 
 
@@ -248,6 +223,6 @@ if __name__ == "__main__":
         print("\n" + "=" * 60)
         print(f"  {cfg.name}  (target = {cfg.target})")
         print(f"  weights : coherence={cfg.weights.coherence} "
-              f"progress={cfg.weights.originality} interest={cfg.weights.interest}")
+              f"progress={cfg.weights.originality} potential={cfg.weights.potential}")
         print()
         print(cfg.prompt.strip())

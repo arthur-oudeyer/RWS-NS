@@ -45,7 +45,7 @@ def _print_result(video_name: str, result: GraderOutput) -> None:
     print(f"  FITNESS    : {result.fitness:.4f}")
     print(f"  coherence  : {result.raw_scores.get('coherence', 0):.2f}  "
           f"  originality : {result.raw_scores.get('originality', 0):.2f}  "
-          f"  interest : {result.raw_scores.get('interest', 0):.2f}")
+          f"  potential : {result.raw_scores.get('potential', 0):.2f}")
     print(DASH)
     print("  OBSERVATION:")
     print(_wrap(result.extra.get("observation", ""), indent="    "))
@@ -55,7 +55,7 @@ def _print_result(video_name: str, result: GraderOutput) -> None:
     print()
     print("  COHERENCE  reason :", _wrap(result.extra.get("coherence_reason", ""), indent="    ").lstrip())
     print("  ORIGINALITY   reason :", _wrap(result.extra.get("originality_reason",  ""), indent="    ").lstrip())
-    print("  INTEREST   reason :", _wrap(result.extra.get("interest_reason",  ""), indent="    ").lstrip())
+    print("  POTENTIAL   reason :", _wrap(result.extra.get("interest_reason",  ""), indent="    ").lstrip())
     print(SEP)
 
 
