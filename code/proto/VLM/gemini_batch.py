@@ -283,8 +283,12 @@ class GeminiBatchGrader:
                 contents = contents,
             )
             elapsed = time.time() - t0
-            if self._debug: pass
-            print(f"  Batch response received in {elapsed:.2f}s")
+            if self._debug:
+                print(f"  Batch response received in {elapsed:.2f}s")
+                usage = response.usage_metadata
+                print(f"  Tokens — input: {usage.prompt_token_count}, "
+                      f"output: {usage.candidates_token_count}, "
+                      f"total: {usage.total_token_count}")
 
         finally:
             for f in uploaded:
@@ -462,6 +466,25 @@ def _parse_single_video(parsed: dict) -> dict:
     return {**parsed, "overall": overall}
 
 
+def format_full_video_answer(video_id: str, out: dict) -> str:
+    """Pretty multi-line dump of one video's full VLM answer (scores + reasons)."""
+    def _dim(key: str) -> str:
+        v = out.get(key, {})
+        if isinstance(v, dict):
+            return f"{v.get('score')}  — {v.get('reason', '')}"
+        return str(v)
+
+    return "\n".join([
+        f"┌─ {video_id}   (overall={out.get('overall')})",
+        f"│ observation    : {out.get('observation', '')}",
+        f"│ interpretation : {out.get('interpretation', '')}",
+        f"│ coherence      : {_dim('coherence')}",
+        f"│ originality    : {_dim('originality')}",
+        f"│ potential      : {_dim('potential')}",
+        "└" + "─" * 60,
+    ])
+
+
 def _upload_video(client: genai.Client, video_path: str, label: str, debug: bool = False) -> genai_types.File:
     if debug:
         print(f"  Uploading {label} ({video_path})...")
@@ -475,6 +498,33 @@ def _upload_video(client: genai.Client, video_path: str, label: str, debug: bool
     if video_file.state.name == "FAILED":
         raise RuntimeError(f"Video upload failed for {label}")
     return video_file
+
+
+# Defaults for video input knobs.
+#   fps              : frames/sec Gemini samples (temporal). Default API = 1.
+#   media_resolution : tokens/frame tier (spatial). Default API for video = LOW.
+DEFAULT_VIDEO_FPS              = 10
+DEFAULT_VIDEO_MEDIA_RESOLUTION = "MEDIUM"   # one of "LOW" / "MEDIUM" / "HIGH" / None
+
+
+def _video_part(file: genai_types.File, fps: Optional[int]) -> genai_types.Part:
+    """Build a video Part, applying a per-Part sampling rate (fps) if given."""
+    part = genai_types.Part.from_uri(file_uri=file.uri, mime_type="video/mp4")
+    if fps is not None:
+        part.video_metadata = genai_types.VideoMetadata(fps=fps)
+    return part
+
+
+def _media_resolution_config(media_resolution: Optional[str]) -> Optional[genai_types.GenerateContentConfig]:
+    """
+    Request-level GenerateContentConfig setting media_resolution (spatial tier).
+    Returns None when media_resolution is None (use API default).
+    NB: media_resolution is per-request, so it applies to every item in the batch.
+    """
+    if media_resolution is None:
+        return None
+    res = getattr(genai_types.MediaResolution, f"MEDIA_RESOLUTION_{media_resolution.upper()}")
+    return genai_types.GenerateContentConfig(media_resolution=res)
 
 
 # ---------------------------------------------------------------------------
@@ -492,6 +542,8 @@ class GeminiVideoBatchGrader:
     target_behaviour : behavioural target string (e.g. "move forward").
     model_name       : Gemini model ID.
     batch_size       : max videos per request (default 10).
+    fps              : frames/sec sampled from each video (temporal detail).
+    media_resolution : "LOW"/"MEDIUM"/"HIGH"/None — tokens per frame (spatial).
     debug            : print upload/parse details.
     """
 
@@ -499,14 +551,18 @@ class GeminiVideoBatchGrader:
         self,
         api_key:          str,
         target_behaviour: str,
-        model_name:       str  = MODEL,
-        batch_size:       int  = 10,
-        debug:            bool = False,
+        model_name:       str           = MODEL,
+        batch_size:       int           = 10,
+        fps:              Optional[int] = DEFAULT_VIDEO_FPS,
+        media_resolution: Optional[str] = DEFAULT_VIDEO_MEDIA_RESOLUTION,
+        debug:            bool          = False,
     ):
         self._client           = genai.Client(api_key=api_key)
         self._target_behaviour = target_behaviour
         self._model_name       = model_name
         self._batch_size       = batch_size
+        self._fps              = fps
+        self._media_resolution = media_resolution
         self._debug            = debug
 
     def score_batch(
@@ -542,22 +598,26 @@ class GeminiVideoBatchGrader:
             contents = []
             for video_id, file in zip(video_ids, uploaded):
                 contents.append(f"{video_id}:")
-                contents.append(
-                    genai_types.Part.from_uri(file_uri=file.uri, mime_type="video/mp4")
-                )
+                contents.append(_video_part(file, self._fps))
             contents.append(build_batch_video_prompt(self._target_behaviour, video_ids))
             print(f"Batch uplaoded in {time.time() - t_start} s")
             if self._debug:
-                print(f"  Sending batch of {len(videos)} videos to {self._model_name}...")
+                print(f"  Sending batch of {len(videos)} videos to {self._model_name} "
+                      f"(fps={self._fps}, res={self._media_resolution})...")
 
             t0 = time.time()
             response = self._client.models.generate_content(
                 model    = self._model_name,
                 contents = contents,
+                config   = _media_resolution_config(self._media_resolution),
             )
             elapsed = time.time() - t0
             if self._debug:
                 print(f"  Batch response received in {elapsed:.2f}s")
+                usage = response.usage_metadata
+                print(f"  Tokens — input: {usage.prompt_token_count}, "
+                      f"output: {usage.candidates_token_count}, "
+                      f"total: {usage.total_token_count}")
 
         finally:
             for f in uploaded:
@@ -591,12 +651,18 @@ class GeminiVideoBatchGrader:
 def score_robot_video_batch(
     video_dir:        str,
     target_behaviour: str,
-    batch_size:       int  = 10,
-    debug:            bool = True,
+    batch_size:       int           = 10,
+    fps:              Optional[int] = DEFAULT_VIDEO_FPS,
+    media_resolution: Optional[str] = DEFAULT_VIDEO_MEDIA_RESOLUTION,
+    verbose:          bool          = False,
+    debug:            bool          = True,
 ) -> dict[str, dict]:
     """
     Convenience wrapper: load all .mp4 from `video_dir` and score them in
     batches. Returns dict mapping video_id (file stem) -> parsed scoring dict.
+
+    verbose=True also prints the full VLM answer per video (observation,
+    interpretation, and the reason behind each score).
     """
     video_paths = sorted(Path(video_dir).glob("*.mp4"))
     if not video_paths:
@@ -610,6 +676,8 @@ def score_robot_video_batch(
         api_key          = APIKEY_GEMINI,
         target_behaviour = target_behaviour,
         batch_size       = batch_size,
+        fps              = fps,
+        media_resolution = media_resolution,
         debug            = debug,
     )
     t0 = time.time()
@@ -622,7 +690,161 @@ def score_robot_video_batch(
               f"coh={out.get('coherence', {}).get('score')}  "
               f"ori={out.get('originality', {}).get('score')}  "
               f"pot={out.get('potential', {}).get('score')}")
+
+    if verbose:
+        print(f"\nFull VLM answers:")
+        for vid, out in results.items():
+            print(format_full_video_answer(vid, out))
     return results
+
+
+# ---------------------------------------------------------------------------
+# Token / cost measurement
+# ---------------------------------------------------------------------------
+# count_tokens() is free and does NOT generate anything: it returns the exact
+# input token count for the contents we would send. We rebuild the SAME
+# contents the graders send so the count matches a real request. A real
+# generate_content call is only needed to measure OUTPUT tokens (via
+# response.usage_metadata), which count_tokens cannot predict.
+
+@dataclass
+class TokenReport:
+    input_tokens:  int
+    output_tokens: Optional[int] = None      # only set if a real call was made
+    n_items:       int           = 0
+    model:         str           = MODEL
+
+    def cost(self, in_per_1m: float, out_per_1m: float = 0.0) -> float:
+        c = self.input_tokens / 1e6 * in_per_1m
+        if self.output_tokens:
+            c += self.output_tokens / 1e6 * out_per_1m
+        return c
+
+    def __str__(self) -> str:
+        per = f"  ({self.input_tokens / self.n_items:.0f}/item)" if self.n_items else ""
+        out = f"  output={self.output_tokens}" if self.output_tokens is not None else ""
+        return f"[{self.model}] input={self.input_tokens}{per}{out}  items={self.n_items}"
+
+
+def count_image_batch_tokens(
+    images:        list[tuple[str, PILImage.Image]],
+    prompt_config: GeminiPromptConfig,
+    model_name:    str  = MODEL,
+    real_call:     bool = False,
+    debug:         bool = False,
+) -> TokenReport:
+    """
+    Measure the input tokens for one morphology (image) batch, using the exact
+    contents GeminiBatchGrader sends. Set real_call=True to also fire one
+    generate_content and capture output tokens (billable).
+    """
+    client    = genai.Client(api_key=APIKEY_GEMINI)
+    robot_ids = [rid for rid, _ in images]
+    uploaded: list[genai_types.File] = []
+    try:
+        for robot_id, img in images:
+            uploaded.append(_upload_image(client, img, robot_id, debug))
+
+        contents = []
+        for robot_id, file in zip(robot_ids, uploaded):
+            contents.append(f"{robot_id}:")
+            contents.append(genai_types.Part.from_uri(file_uri=file.uri, mime_type="image/png"))
+        contents.append(build_batch_prompt(prompt_config, robot_ids))
+
+        n_in = client.models.count_tokens(model=model_name, contents=contents).total_tokens
+
+        n_out = None
+        if real_call:
+            resp  = client.models.generate_content(model=model_name, contents=contents)
+            n_in  = resp.usage_metadata.prompt_token_count
+            n_out = resp.usage_metadata.candidates_token_count
+    finally:
+        for f in uploaded:
+            client.files.delete(name=f.name)
+
+    return TokenReport(input_tokens=n_in, output_tokens=n_out, n_items=len(images), model=model_name)
+
+
+def count_video_batch_tokens(
+    videos:           list[tuple[str, str]],
+    target_behaviour: str,
+    model_name:       str           = MODEL,
+    fps:              Optional[int] = DEFAULT_VIDEO_FPS,
+    media_resolution: Optional[str] = DEFAULT_VIDEO_MEDIA_RESOLUTION,
+    real_call:        bool          = False,
+    debug:            bool          = False,
+) -> TokenReport:
+    """
+    Measure the input tokens for one controller (video) batch, using the exact
+    contents GeminiVideoBatchGrader sends. `fps` is honoured by count_tokens
+    (temporal). `media_resolution` only affects a real_call (count_tokens
+    ignores it), so set real_call=True to measure its effect and output tokens.
+    """
+    client    = genai.Client(api_key=APIKEY_GEMINI)
+    video_ids = [vid for vid, _ in videos]
+    uploaded: list[genai_types.File] = []
+    try:
+        for video_id, path in videos:
+            uploaded.append(_upload_video(client, path, video_id, debug))
+
+        contents = []
+        for video_id, file in zip(video_ids, uploaded):
+            contents.append(f"{video_id}:")
+            contents.append(_video_part(file, fps))
+        contents.append(build_batch_video_prompt(target_behaviour, video_ids))
+
+        n_in = client.models.count_tokens(model=model_name, contents=contents).total_tokens
+
+        n_out = None
+        if real_call:
+            resp  = client.models.generate_content(
+                model    = model_name,
+                contents = contents,
+                config   = _media_resolution_config(media_resolution),
+            )
+            n_in  = resp.usage_metadata.prompt_token_count
+            n_out = resp.usage_metadata.candidates_token_count
+    finally:
+        for f in uploaded:
+            client.files.delete(name=f.name)
+
+    return TokenReport(input_tokens=n_in, output_tokens=n_out, n_items=len(videos), model=model_name)
+
+
+def measure_tokens(
+    image_dir:        str           = "./img/batch",
+    video_dir:        str           = "./video/batch",
+    batch_size:       int           = 10,
+    target_behaviour: str           = "move forward continuously while staying upright",
+    fps:              Optional[int] = DEFAULT_VIDEO_FPS,
+    media_resolution: Optional[str] = DEFAULT_VIDEO_MEDIA_RESOLUTION,
+    real_call:        bool          = False,
+    debug:            bool          = False,
+):
+    """
+    Measure input (and optionally output) tokens for a 10-batch of morphology
+    images and a 10-batch of controller videos. Prints per-batch counts.
+    Plug your model's $/1M prices into TokenReport.cost(...) for a $ estimate.
+    """
+    img_paths   = sorted(Path(image_dir).glob("*.png"))[:batch_size]
+    video_paths = sorted(Path(video_dir).glob("*.mp4"))[:batch_size]
+
+    if img_paths:
+        images = [(p.stem, PILImage.open(p).convert("RGB")) for p in img_paths]
+        rep = count_image_batch_tokens(images, SPIDER_MORPH, real_call=real_call, debug=debug)
+        print(f"\nMORPHOLOGY image batch ({len(images)} imgs): {rep}")
+    else:
+        print(f"\nNo images found in {image_dir}")
+
+    if video_paths:
+        videos = [(p.stem, str(p)) for p in video_paths]
+        rep = count_video_batch_tokens(
+            videos, target_behaviour, fps=fps, media_resolution=media_resolution,
+            real_call=real_call, debug=debug,
+        )
+        print(f"CONTROLLER video batch ({len(videos)} vids, fps={fps}, res={media_resolution}): {rep}")
+    else:
+        print(f"No videos found in {video_dir}")
 
 
 # ---------------------------------------------------------------------------
@@ -710,19 +932,87 @@ def run_benchmark(image_dir: str, batch_size: int = 10, debug: bool = True):
 
 
 # ---------------------------------------------------------------------------
+# Video settings experiment
+# ---------------------------------------------------------------------------
+
+def run_video_settings_experiment(
+    video_dir:        str,
+    target_behaviour: str,
+    settings:         list[tuple[Optional[int], Optional[str]]],
+    batch_size:       int  = 10,
+    debug:            bool = False,
+):
+    """
+    Score the same video batch under several (fps, media_resolution) settings
+    and print a side-by-side comparison of the `overall` score per video, plus
+    the input-token cost of each setting (from count_tokens, free).
+
+    `settings` is a list of (fps, media_resolution) pairs, e.g.
+        [(1, "LOW"), (10, "MEDIUM"), (20, "HIGH")]
+    """
+    video_paths = sorted(Path(video_dir).glob("*.mp4"))[:batch_size]
+    if not video_paths:
+        print(f"No MP4 videos found in {video_dir}")
+        sys.exit(1)
+    videos = [(p.stem, str(p)) for p in video_paths]
+    video_ids = [vid for vid, _ in videos]
+    print(f"Found {len(videos)} videos in {video_dir}\n")
+
+    # score per setting
+    per_setting: dict[str, dict[str, dict]] = {}
+    tokens:      dict[str, int]             = {}
+    for fps, res in settings:
+        label = f"fps={fps},res={res}"
+        print(f"{'='*60}\n  SETTING {label}\n{'='*60}")
+        tokens[label] = count_video_batch_tokens(
+            videos, target_behaviour, fps=fps, media_resolution=res, debug=debug,
+        ).input_tokens
+        grader = GeminiVideoBatchGrader(
+            api_key          = APIKEY_GEMINI,
+            target_behaviour = target_behaviour,
+            batch_size       = batch_size,
+            fps              = fps,
+            media_resolution = res,
+            debug            = debug,
+        )
+        per_setting[label] = grader.score_batch(videos)
+
+    # comparison table: overall score per video across settings
+    labels = list(per_setting.keys())
+    print(f"\n{'='*60}\n  OVERALL score per video\n{'='*60}")
+    header = f"  {'video':<22}" + "".join(f"{lab:>22}" for lab in labels)
+    print(header)
+    for vid in video_ids:
+        row = f"  {vid:<22}"
+        for lab in labels:
+            ov = per_setting[lab].get(vid, {}).get("overall")
+            row += f"{str(ov):>22}"
+        print(row)
+
+    print(f"\n  Input tokens (count_tokens, fps only; res needs a real call):")
+    for lab in labels:
+        print(f"    {lab:<24} {tokens[lab]} tok  ({tokens[lab]/len(videos):.0f}/video)")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Image batch benchmark:
-    #   python gemini_batch.py [img_dir] [batch_size]
-    # Video batch scoring:
-    #   python gemini_batch.py video [video_dir] [batch_size]
+    TARGET    = "Jump as high as possible"
+    VIDEO_DIR = "./video/batch_2"
+    IMG_DIR   = "./img/batch"
 
-    dir  = "./img/batch"
-    batch_size = 10
-    run_benchmark(dir, batch_size=batch_size, debug=True)
+    # ── Score one video batch at the chosen setting ─────────────────────────
+    FPS = 5
+    RESOLUTION = "MEDIUM"   # "LOW" / "MEDIUM" / "HIGH" / None
+    # verbose=True prints the full VLM answer per video (observation,
+    # interpretation, and the reason behind each score).
+    score_robot_video_batch(VIDEO_DIR, TARGET, fps=FPS, media_resolution=RESOLUTION,
+                            verbose=True, debug=True)
 
-    # img_dir    = sys.argv[1] if len(sys.argv) > 1 else "./img/batch"
-    # batch_size = int(sys.argv[2]) if len(sys.argv) > 2 else 10
-    #
+    # ── Token / cost measurement (real_call=True also bills output tokens) ──
+    # measure_tokens(fps=FPS, media_resolution=RESOLUTION, real_call=False, debug=True)
+
+    # ── Image morphology batch benchmark (batch vs single) ──────────────────
+    # run_benchmark(IMG_DIR, batch_size=10, debug=True)

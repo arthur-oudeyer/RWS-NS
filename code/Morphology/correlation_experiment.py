@@ -281,35 +281,34 @@ def compute_correlations(
 # Plotting helpers
 # ---------------------------------------------------------------------------
 
-_DARK_BG  = "#1e1e1e"
-_DARK_BG2 = "#252525"
-_GRID     = "#333333"
-_SCATTER  = "#66aaff"
-_REGLINE  = "#ff8844"
-_TEXT_DIM = ("coherence", "#88aaff"), ("originality", "#ffaa44"), ("potential", "#88ff88"), ("overall", "#cccccc")
+_BG       = "#ffffff"
+_REGLINE  = "#e15759"
+_TEXT_DIM = ("coherence", "#4e79a7"), ("originality", "#f28e2b"), ("potential", "#59a14f"), ("overall", "#555555")
 _DIM_COLOR = {d: c for d, c in _TEXT_DIM}
 
 
 def _make_axes(ax, dim: str):
-    ax.set_facecolor(_DARK_BG2)
-    ax.tick_params(colors="#888888", labelsize=8)
-    for spine in ax.spines.values():
-        spine.set_edgecolor("#444444")
+    ax.set_facecolor(_BG)
+    ax.tick_params(colors="#666666", labelsize=8, length=0)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    for spine in ("left", "bottom"):
+        ax.spines[spine].set_edgecolor("#cccccc")
     ax.set_xlim(-0.5, 10.5)
     ax.set_ylim(-0.5, 10.5)
-    ax.grid(True, color=_GRID, linewidth=0.5, zorder=0)
-    ax.set_xlabel("Human score (0–10)", color="#aaaaaa", fontsize=9)
-    ax.set_ylabel("VLM score (0–10)",   color="#aaaaaa", fontsize=9)
+    ax.grid(True, axis="both", color="#eeeeee", linewidth=0.8, zorder=0)
+    ax.set_xlabel("Human score (0–10)", color="#666666", fontsize=9)
+    ax.set_ylabel("VLM score (0–10)",   color="#666666", fontsize=9)
 
 
 def _scatter_and_fit(ax, h: np.ndarray, v: np.ndarray, dim: str):
-    color = _DIM_COLOR.get(dim, "#66aaff")
-    ax.scatter(h, v, color=color, alpha=0.75, s=60, zorder=3,
-               edgecolors="#ffffff22", linewidths=0.4)
+    color = _DIM_COLOR.get(dim, "#4e79a7")
+    ax.scatter(h, v, color=color, alpha=0.8, s=45, zorder=3,
+               edgecolors="none")
     if len(h) >= 3:
         m, b = np.polyfit(h, v, 1)
         xs = np.linspace(h.min(), h.max(), 100)
-        ax.plot(xs, m * xs + b, color=_REGLINE, linewidth=1.8, zorder=4)
+        ax.plot(xs, m * xs + b, color=_REGLINE, linewidth=1.5, zorder=4)
 
 
 def plot_dimension(corr: dict, dim: str, output: Path) -> None:
@@ -320,7 +319,7 @@ def plot_dimension(corr: dict, dim: str, output: Path) -> None:
     n = corr["n"]
 
     fig, ax = plt.subplots(figsize=(6, 5))
-    fig.patch.set_facecolor(_DARK_BG)
+    fig.patch.set_facecolor(_BG)
 
     _make_axes(ax, dim)
     _scatter_and_fit(ax, h, v, dim)
@@ -329,7 +328,7 @@ def plot_dimension(corr: dict, dim: str, output: Path) -> None:
     p_str = f"  p = {p:.4f}" if p is not None else ""
     ax.set_title(
         f"{dim.capitalize()}  ({r_str}{p_str}  n = {n})",
-        color="#cccccc", fontsize=11, pad=10,
+        color="#333333", fontsize=11, pad=10,
     )
 
     fig.tight_layout()
@@ -342,7 +341,7 @@ def plot_dimension(corr: dict, dim: str, output: Path) -> None:
 def plot_all(correlations: dict, output: Path) -> None:
     dims = list(DIMENSIONS) + ["overall"]
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    fig.patch.set_facecolor(_DARK_BG)
+    fig.patch.set_facecolor(_BG)
     axes = axes.flatten()
 
     for ax, dim in zip(axes, dims):
@@ -361,12 +360,12 @@ def plot_all(correlations: dict, output: Path) -> None:
         p_str = f"  p={p:.4f}" if p is not None else ""
         ax.set_title(
             f"{dim.capitalize()}  ({r_str}{p_str}  n={n})",
-            color="#cccccc", fontsize=10,
+            color="#333333", fontsize=10,
         )
 
     fig.suptitle(
         "Human vs VLM Morphology Evaluation — Correlation",
-        color="#dddddd", fontsize=13, y=1.01,
+        color="#222222", fontsize=13, y=1.01,
     )
     fig.tight_layout()
     out = output / "plot_all.png"

@@ -15,3 +15,9 @@ code/api_keys.py
 code/Morphology/results/*/*
 code/Controller/results/*/*
 code/Controller_MJX/results/*/*
+.claude
+CLAUDE.md
+
+# Build / run artifacts (trained policies, standalone MJX CLI output)
+code/Controller_MJX/mjx_study_output/
+**/*.params

@@ -630,7 +630,7 @@ def _cli():
     if args.mu        is not None: cfg.mu              = args.mu
     if args.lambda_   is not None: cfg.lambda_         = args.lambda_
     if args.n_gen     is not None: cfg.n_generations   = args.n_gen
-    if args.prompt_set is not None: cfg.prompt_set_name = args.prompt_set
+    if args.prompt_set is not None: cfg.prompt_name = args.prompt_set
     if args.seed is not None: cfg.seed = args.seed
     if args.output_dir is not None: cfg.output_dir = args.output_dir
 

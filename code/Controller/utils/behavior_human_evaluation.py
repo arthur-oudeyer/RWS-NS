@@ -813,6 +813,7 @@ class BehaviorEvalApp:
             render_mode      = "rgb_array",
             render_width     = _cfg.render_width,
             render_height    = _cfg.render_height,
+            fall_height      = self.params.fall_height,
         )
         actual_video_path, rollout_info = rollout_to_video(
             model, env, video_path, fps=_cfg.video_fps

@@ -1,0 +1,26 @@
+# ---------------------------------------------------------------------------
+# proto/ — proof-of-concept locomotion simulation + standalone VLM scoring
+# Runs on a laptop (CPU). No GPU required.
+#
+#   pip install -r requirements.txt
+# ---------------------------------------------------------------------------
+
+# --- Simulation --------------------------------------------------------------
+mujoco               # physics engine + interactive viewer
+numpy
+colorama             # coloured terminal output (main_sim.py)
+imageio              # video export (Mujoco/video_render.py)
+imageio-ffmpeg       # ffmpeg backend for imageio (.mp4 writing)
+Pillow               # image I/O
+matplotlib           # archive / selection plots (Selection/)
+tqdm                 # progress bars (Robot/simplebrain_loc)
+
+# --- VLM scoring (VLM/*.py) --------------------------------------------------
+google-genai         # Gemini API   (VLM/gemini_flash.py, gemini_batch.py, count_tokens.py)
+open_clip_torch      # CLIP image scoring (VLM/CLIP.py) — pulls in torch
+# torch is installed automatically by open_clip_torch. For a CUDA build, install
+# it first from https://pytorch.org (e.g. --index-url .../whl/cu121).
+
+# --- Optional / experimental local models -----------------------------------
+# openai             # only for VLM/Gemma.py  (OpenRouter-hosted models)
+# ollama             # only for VLM/qwen_7b.py (local Ollama server)

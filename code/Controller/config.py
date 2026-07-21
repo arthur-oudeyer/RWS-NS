@@ -78,7 +78,7 @@ class ExperimentConfig:
     init_population_size: int = 10   # 0 = strategy default
 
     # ---- Morphology / Env ----------------------------------------------------
-    morphology = "tripod" # Morphology, default None -> QUADRIPOD
+    morphology = "robot" # Morphology, default None -> QUADRIPOD
     photorealistic = True
 
     # ---- Reward weights (defaults; mutation σ controls per-gen jitter) -------
@@ -138,8 +138,8 @@ class ExperimentConfig:
 
     # ---- Video / VLM render -------------------------------------------------
     video_fps:           int  = 20
-    render_width:        int  = 192   # per-camera; total video width = 2 × this
-    render_height:       int  = 192
+    render_width:        int  = 360   # per-camera; total video width = 2 × this
+    render_height:       int  = 360
     camera_track_torso:  bool = False
 
     # Origin tile — colored marker at (0,0) so the VLM can gauge displacement.

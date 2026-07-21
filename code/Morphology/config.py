@@ -17,7 +17,7 @@ Usage
         mu              = 10,
         lambda_         = 20,
         n_generations   = 50,
-        prompt_set_name = "spider_body",
+        prompt_name     = "spider_body",
     )
     cfg.save("results/run_001/config.json")
 
@@ -66,7 +66,7 @@ class ExperimentConfig:
                     add_remove_prob, allow_branching, branching_prob
     Rendering     : render_width, render_height, camera_views
     Grader        : clip_model, clip_pretrained, clip_cache_dir,
-                    scoring_method, prompt_set_name
+                    scoring_method, prompt_name
     Output        : output_dir, save_every_n_gen
     MapElite      : symmetry_bins  (bin edges for symmetry feature)
     """
@@ -148,7 +148,7 @@ class ExperimentConfig:
     # Gemini 3.1 Flash-Lite -> gemini-3.1-flash-lite-preview    ~8s/image
     # Gemini 3 Flash        -> gemini-3-flash-preview           ~10s/image (batch -> ~5s/imag)
     # Gemini 3.1 Pro        -> gemini-3.1-pro-preview           ~15s/image
-    gemini_model:    str = "gemini-3-flash-preview"
+    gemini_model:    str = "gemini-3.5-flash-preview"
     batching:        int = 20
 
     # API resilience: transient Gemini errors (503/429/timeouts) are retried
@@ -268,7 +268,7 @@ if __name__ == "__main__":
         lambda_         = 30,
         n_generations   = 100,
         seed            = 7,
-        prompt_set_name = "spider_body",
+        prompt_name     = "spider_body",
         allow_branching = True,
         description     = "Spider body optimisation with branching",
     )
@@ -283,7 +283,7 @@ if __name__ == "__main__":
 
         assert cfg3.run_id          == cfg2.run_id
         assert cfg3.mu              == cfg2.mu
-        assert cfg3.prompt_set_name == cfg2.prompt_set_name
+        assert cfg3.prompt_name == cfg2.prompt_name
         assert cfg3.allow_branching == cfg2.allow_branching
         print(f"  Saved to   : {saved}")
         print(f"  Loaded run : {cfg3.run_id}")

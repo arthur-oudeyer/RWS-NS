@@ -1,0 +1,27 @@
+# ---------------------------------------------------------------------------
+# Controller/ — controller (locomotion) evolution, CPU MuJoCo + Stable-Baselines3
+# Runs on a laptop (CPU). Superseded by Controller_MJX/ for GPU-scale runs.
+#
+#   pip install -r requirements.txt
+# ---------------------------------------------------------------------------
+
+# --- Simulation + RL ---------------------------------------------------------
+mujoco               # physics engine (CPU)
+gymnasium            # RL environment API
+stable-baselines3    # PPO implementation — pulls in torch
+numpy
+scipy                # correlation stats (behavior_correlation_experiment.py)
+
+# --- Rendering / video -------------------------------------------------------
+Pillow
+imageio              # rollout MP4 writing (video_renderer.py)
+imageio-ffmpeg       # ffmpeg backend for imageio
+
+# --- VLM grader --------------------------------------------------------------
+google-genai         # Gemini API (grader.py)
+
+# --- Analysis / plotting (desktop only, needs system Tk for the Tk explorer) -
+matplotlib
+
+# torch is installed automatically by stable-baselines3. For a CUDA build,
+# install it first from https://pytorch.org to match your driver.

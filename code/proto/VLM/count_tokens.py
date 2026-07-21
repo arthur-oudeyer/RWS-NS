@@ -1,8 +1,10 @@
 from google import genai
 import PIL.Image
+import sys, os
 
 # ── Config ────────────────────────────────────────────────────────────────────
-from code.api_keys import APIKEY_GEMINI
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))  # code/ — for api_keys.py
+from api_keys import APIKEY_GEMINI
 API_KEY = APIKEY_GEMINI
 MODEL   = "gemini-3.1-flash-lite-preview"
 

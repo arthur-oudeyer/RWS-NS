@@ -32,7 +32,7 @@ import matplotlib.patches
 matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-r
+
 try:
     from PIL import Image as PILImage, ImageTk
     _PIL_OK = True

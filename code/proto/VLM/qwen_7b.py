@@ -7,8 +7,6 @@ import tempfile
 import shutil
 from pathlib import Path
 
-from Cython.Shadow import returns
-
 
 def extract_frames(video_path: str, n_frames_per_sec: int = 4) -> list[str]:
     """Extrait n frames régulièrement espacées de la vidéo."""

@@ -1,0 +1,34 @@
+# ---------------------------------------------------------------------------
+# Controller_MJX/ — GPU-accelerated controller evolution (MJX + JAX)
+# Designed to run on a CUDA GPU. Also runs on CPU (slow) and Apple Metal
+# (experimental) for small tests.
+#
+# 1) Install JAX for YOUR platform FIRST (this pins the accelerator build):
+#      CUDA 12 GPU :  pip install -U "jax[cuda12]"
+#      CPU only    :  pip install -U "jax"
+#      Apple Metal :  pip install -U jax-metal      # experimental
+#    See https://docs.jax.dev/en/latest/installation.html
+#
+# 2) Then install the rest:
+#      pip install -r requirements.txt
+# ---------------------------------------------------------------------------
+
+# --- Physics + JAX RL stack --------------------------------------------------
+mujoco               # physics engine + renderer (EGL headless)
+mujoco-mjx           # MJX: MuJoCo physics compiled through JAX (mujoco.mjx)
+jax                  # install the accelerator build first (see header)
+flax                 # neural-network layers + train state
+optax                # optimisers for PPO
+
+# --- Numerics / rendering / video --------------------------------------------
+numpy
+Pillow
+imageio              # rollout MP4 writing (video_renderer_mjx.py)
+imageio-ffmpeg       # ffmpeg backend for imageio
+
+# --- VLM grader --------------------------------------------------------------
+google-genai         # Gemini API (vlm_grader.py)
+
+# --- Analysis / tests (desktop; Tk explorer needs system Tk) -----------------
+matplotlib
+pytest               # test suite (tests/)
