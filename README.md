@@ -162,5 +162,5 @@ so any experiment can be reproduced exactly.
 
 ## Citation / License
 
-If you use this code, please cite the accompanying paper *(add reference here)*
+If you use this code, please cite the accompanying paper *("Using VLMs to evolve 'interesting' robots designs")*
 and add a `LICENSE` file before publishing.
